@@ -40,10 +40,10 @@ class CapabilityManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1)
-    summary: str = Field(min_length=1)
-    description: str = Field(min_length=1)
+    summary: str = Field(default="", min_length=0)
+    description: str = Field(default="", min_length=0)
     risk: RiskLevel = "low"
-    strategies: list[StrategyName] = Field(default_factory=list)
+    strategies: list[StrategyName] = Field(default_factory=lambda: ["network"])
     requires_confirmation: bool = False
     input_schema: dict[str, Any] = Field(default_factory=dict)
     output_schema: dict[str, Any] = Field(default_factory=dict)
@@ -55,9 +55,12 @@ class CapabilityManifest(BaseModel):
 
     @model_validator(mode="after")
     def validate_strategies(self) -> CapabilityManifest:
+        if not self.summary:
+            self.summary = self.name
+        if not self.description:
+            self.description = self.summary
         if not self.strategies:
-            msg = f"capability '{self.name}' must declare at least one strategy"
-            raise ValueError(msg)
+            self.strategies = ["network"]
         return self
 
 
@@ -66,11 +69,11 @@ class SkillManifest(BaseModel):
 
     schema_version: str = Field(default="1.0", min_length=1)
     provider: str = Field(min_length=1)
-    provider_display_name: str = Field(min_length=1)
-    summary: str = Field(min_length=1)
-    description: str = Field(min_length=1)
+    provider_display_name: str = Field(default="", min_length=0)
+    summary: str = Field(default="", min_length=0)
+    description: str = Field(default="", min_length=0)
     base_url: AnyHttpUrl | None = None
-    auth: AuthSpec
+    auth: AuthSpec = Field(default_factory=lambda: AuthSpec(mode="none"))
     prerequisites: list[str] = Field(default_factory=list)
     workflows: list[str] = Field(default_factory=list)
     recovery: list[str] = Field(default_factory=list)
@@ -79,6 +82,12 @@ class SkillManifest(BaseModel):
 
     @model_validator(mode="after")
     def validate_capabilities(self) -> SkillManifest:
+        if not self.provider_display_name:
+            self.provider_display_name = self.provider
+        if not self.summary:
+            self.summary = self.provider_display_name
+        if not self.description:
+            self.description = self.summary
         names = [capability.name for capability in self.capabilities]
         if len(names) != len(set(names)):
             msg = f"duplicate capability names found in provider '{self.provider}'"

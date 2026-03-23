@@ -30,6 +30,8 @@ class CapabilityHandler(Protocol):
 
 
 class CapabilityRegistry(Protocol):
+    def resolve(self, capability_name: str) -> CapabilityHandler: ...
+
     def get_descriptor(self, capability_name: str) -> CapabilityDescriptor: ...
 
     def get_handler(self, capability_name: str) -> CapabilityHandler: ...
@@ -74,8 +76,8 @@ class SkillRuntime:
             trace_id=trace_id,
         )
 
-        descriptor = self.registry.get_descriptor(request.capability_name)
-        handler = self.registry.get_handler(request.capability_name)
+        descriptor = self._resolve_descriptor(request.capability_name)
+        handler = self._resolve_handler(request.capability_name)
         validated_payload = descriptor.validate_payload(request.payload)
         if request.trace_id is None:
             context = ExecutionContext(
@@ -114,9 +116,10 @@ class SkillRuntime:
             self._record_trace(context, result, decision.strategy, phase="guardrails.blocked")
             return result
 
-        result = handler.execute(context)
+        result = self._execute_handler(handler, context)
+        trace_context = context
         if result.trace_id != context.trace_id:
-            result = result.model_copy(update={"trace_id": context.trace_id})
+            trace_context = context.model_copy(update={"trace_id": result.trace_id})
         if result.strategy_used not in context.allowed_strategies:
             msg = f"Handler returned unsupported strategy {result.strategy_used!s}."
             raise RuntimeDispatchError(msg)
@@ -125,11 +128,50 @@ class SkillRuntime:
         if warnings != result.warnings:
             result = result.model_copy(update={"warnings": warnings})
 
-        self._record_trace(context, result, result.strategy_used, phase="invoke.completed")
+        self._record_trace(trace_context, result, result.strategy_used, phase="invoke.completed")
         return result
 
     def replay(self, trace_id: str) -> SkillResult:
         return self.replay_store.replay(trace_id)
+
+    def _resolve_descriptor(self, capability_name: str) -> CapabilityDescriptor:
+        registry = self.registry
+        if hasattr(registry, "get_descriptor"):
+            return registry.get_descriptor(capability_name)
+        provider_name, _, _ = capability_name.partition(".")
+        return CapabilityDescriptor(
+            capability_name=capability_name,
+            provider_name=provider_name or "unknown",
+        )
+
+    def _resolve_handler(self, capability_name: str) -> CapabilityHandler:
+        registry = self.registry
+        if hasattr(registry, "get_handler"):
+            return registry.get_handler(capability_name)
+        if hasattr(registry, "resolve"):
+            return registry.resolve(capability_name)
+        msg = f"Registry cannot resolve capability '{capability_name}'."
+        raise RuntimeDispatchError(msg)
+
+    def _execute_handler(self, handler: CapabilityHandler, context: ExecutionContext) -> SkillResult:
+        if hasattr(handler, "execute"):
+            return handler.execute(context)
+
+        if callable(handler):
+            raw_result = handler(context.payload, session_id=context.session_id)
+            if isinstance(raw_result, SkillResult):
+                return raw_result
+            if isinstance(raw_result, dict):
+                return SkillResult.model_validate(
+                    {
+                        "capability_name": context.capability_name,
+                        "session_id": context.session_id,
+                        **raw_result,
+                    }
+                )
+
+        msg = f"Unsupported handler type for capability '{context.capability_name}'."
+        raise RuntimeDispatchError(msg)
 
     def _finalize_failure(
         self,

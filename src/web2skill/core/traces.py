@@ -152,8 +152,9 @@ class FileTraceStore:
         return sorted(traces, key=lambda item: item.completed_at, reverse=True)
 
 
-class ReplayStore(RuntimeBaseModel):
-    trace_store: TraceStore
+class ReplayStore:
+    def __init__(self, *, trace_store: TraceStore) -> None:
+        self.trace_store = trace_store
 
     def replay(self, trace_id: str) -> SkillResult:
         trace = self.trace_store.get(trace_id)
@@ -161,3 +162,6 @@ class ReplayStore(RuntimeBaseModel):
             msg = f"Unknown trace_id: {trace_id}"
             raise KeyError(msg)
         return trace.result.model_copy(update={"strategy_used": Strategy.REPLAY})
+
+
+TraceRecord = InvocationTrace

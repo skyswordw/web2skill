@@ -5,7 +5,7 @@ from enum import StrEnum
 from typing import Annotated
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, JsonValue as PydanticJsonValue, TypeAdapter
 
 
 def utc_now() -> datetime:
@@ -17,7 +17,7 @@ def new_trace_id() -> str:
 
 
 JsonPrimitive = str | int | float | bool | None
-JsonValue = JsonPrimitive | list["JsonValue"] | dict[str, "JsonValue"]
+JsonValue = PydanticJsonValue
 StructuredPayload = dict[str, JsonValue]
 MetadataValue = JsonPrimitive | list[JsonPrimitive] | dict[str, JsonPrimitive]
 
@@ -77,7 +77,7 @@ class ExecutionContext(RuntimeBaseModel):
 
 class SkillResult(RuntimeBaseModel):
     trace_id: TraceId
-    capability_name: CapabilityName
+    capability_name: CapabilityName | None = None
     strategy_used: Strategy
     requires_human: bool
     output: JsonValue | None = None
@@ -156,3 +156,6 @@ class CapabilityDescriptor(RuntimeBaseModel):
 
 def validate_structured_payload(payload: object) -> StructuredPayload:
     return STRUCTURED_PAYLOAD_ADAPTER.validate_python(payload)
+
+
+SkillRequest = InvocationRequest

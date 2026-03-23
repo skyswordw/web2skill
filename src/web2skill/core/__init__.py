@@ -6,6 +6,7 @@ from web2skill.core.contracts import (
     ReplayRequest,
     RiskLevel,
     SkillError,
+    SkillRequest,
     SkillResult,
     Strategy,
 )
@@ -47,6 +48,7 @@ __all__ = [
     "SessionRecord",
     "SessionStore",
     "SkillError",
+    "SkillRequest",
     "SkillResult",
     "SkillRuntime",
     "Strategy",

@@ -76,7 +76,7 @@ def build_app(
     ) -> None:
         capabilities = services.registry.list_capabilities(provider=provider)
         if as_json:
-            _echo_json([capability.model_dump(mode="json") for capability in capabilities])
+            _echo_json({"capabilities": [capability.model_dump(mode="json") for capability in capabilities]})
             return
         for capability in capabilities:
             typer.echo(f"{capability.name}\t{capability.summary}")
