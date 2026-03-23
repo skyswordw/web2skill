@@ -20,7 +20,7 @@ session_hooks:
   login_script: "scripts/session/login.py"
   doctor_script: "scripts/session/doctor.py"
 prerequisites:
-  - "Install Chromium with `uv run playwright install chromium` before interactive login flows."
+  - "Install Chromium with `python -m playwright install chromium` before interactive login flows."
   - "Persist browser storage state after login so agents can reuse the same session."
 workflows:
   - "Prefer network responses for search and metadata endpoints."

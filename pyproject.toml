@@ -6,11 +6,29 @@ build-backend = "hatchling.build"
 name = "web2skill"
 version = "0.1.0"
 description = "Turn stable SaaS capabilities into agent-usable skills."
-readme = "README.md"
+readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.13,<3.15"
-license = { text = "MIT" }
+license = { file = "LICENSE" }
 authors = [
   { name = "Codex" },
+]
+keywords = [
+  "agent-skills",
+  "browser-automation",
+  "modelscope",
+  "playwright",
+  "saas",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Internet :: WWW/HTTP",
+  "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
   "browser-cookie3>=0.20.1",
@@ -29,10 +47,14 @@ dev = [
   "pytest-asyncio>=0.26.0,<0.27",
   "pytest-cov>=6.1.1,<7",
   "ruff>=0.11.5,<0.12",
+  "twine>=6.1.0,<7",
 ]
 
 [project.urls]
-Homepage = "https://github.com/example/web2skill"
+Homepage = "https://github.com/skyswordw/web2skill"
+Repository = "https://github.com/skyswordw/web2skill"
+Documentation = "https://github.com/skyswordw/web2skill#readme"
+Issues = "https://github.com/skyswordw/web2skill/issues"
 
 [project.scripts]
 web2skill = "web2skill.cli:app"
@@ -45,8 +67,11 @@ packages = ["src/web2skill"]
 
 [tool.hatch.build.targets.sdist]
 include = [
+  "src/**",
   "skills/**",
-  "src/web2skill/bundled_skills/__init__.py",
+  "README.md",
+  "README.zh-CN.md",
+  "LICENSE",
 ]
 
 [tool.pytest.ini_options]

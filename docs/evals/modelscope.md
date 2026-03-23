@@ -14,7 +14,7 @@ without `unit + integration + e2e + drift` coverage.
 | Layer | Files | Goal |
 | --- | --- | --- |
 | Unit | `tests/unit/core/`, `tests/unit/skills/`, `tests/unit/providers/modelscope/` | Validate Pydantic contracts, runtime shape, bundle manifests, installer behavior, and parser normalization |
-| Integration | `tests/integration/` | Validate bundle discovery, CLI install/update flows, runtime/script execution, session hooks, replay contracts, and capability exposure |
+| Integration | `tests/integration/` | Validate bundle discovery, CLI install/update flows, artifact installability from wheel/sdist, installed-package runtime/script execution, session hooks, replay contracts, and capability exposure |
 | E2E | `tests/e2e/test_modelscope_live.py` | Exercise the approved ModelScope read capabilities live and gate token writes behind an explicit opt-in |
 | Drift | `tests/drift/test_modelscope_drift.py` | Freeze expected response keys and token-page create-dialog anchors so bundle/parser changes surface early |
 
@@ -49,6 +49,12 @@ Bundle management coverage:
 
 ```bash
 uv run pytest tests/integration/test_skill_installation.py -v
+```
+
+Artifact install and installed-package coverage:
+
+```bash
+uv run pytest tests/integration/test_artifact_distribution.py -v
 ```
 
 Live smoke coverage after preparing a reusable storage-state session:

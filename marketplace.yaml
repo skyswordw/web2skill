@@ -1,0 +1,13 @@
+marketplace_id: "official"
+display_name: "web2skill Official Marketplace"
+plugins:
+  - plugin_id: "modelscope"
+    bundle_id: "modelscope"
+    provider: "modelscope"
+    display_name: "ModelScope"
+    summary: "Install the first-party ModelScope skill bundle from the web2skill monorepo."
+    source:
+      kind: "git_subdir"
+      repo: "https://github.com/skyswordw/web2skill.git"
+      ref: "main"
+      subdir: "skills/modelscope"

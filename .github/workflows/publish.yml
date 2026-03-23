@@ -1,0 +1,96 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      publish_target: ${{ steps.publish-target.outputs.publish_target }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - id: publish-target
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "publish_target=testpypi" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish_target=pypi" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Guard production tags to main ancestry
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          git fetch origin main --depth=1
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Tagged commit is not reachable from origin/main." >&2
+            exit 1
+          fi
+
+      - name: Sync dependencies
+        run: uv sync --dev
+
+      - name: Ruff
+        run: uv run ruff check
+
+      - name: Pyright
+        run: uv run pyright
+
+      - name: Install Chromium
+        run: uv run playwright install chromium
+
+      - name: Pytest
+        run: uv run pytest
+
+      - name: Build distributions
+        run: uv build
+
+      - name: Twine check
+        run: uv run twine check dist/*
+
+      - name: Artifact smoke tests
+        run: uv run pytest tests/integration/test_artifact_distribution.py -q
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-distributions
+          path: dist/*
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: python-distributions
+          path: dist
+
+      - name: Publish to TestPyPI
+        if: needs.build.outputs.publish_target == 'testpypi'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+      - name: Publish to PyPI
+        if: needs.build.outputs.publish_target == 'pypi'
+        uses: pypa/gh-action-pypi-publish@release/v1

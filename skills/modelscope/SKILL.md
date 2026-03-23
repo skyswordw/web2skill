@@ -2,17 +2,62 @@
 
 ModelScope skills expose normalized capability contracts for model discovery, overview inspection, file listing, quickstart extraction, authenticated profile lookup, and access-token management.
 
+This bundle separates public read-only capabilities from authenticated account capabilities. Public capabilities can run without a login. Authenticated capabilities reuse a saved Playwright storage-state file and session record created by `web2skill sessions login modelscope`.
+
+The commands below assume `web2skill` is installed as a package. If you are developing from a source checkout, prefix CLI commands with `uv run`.
+
+## Install Paths
+
+This skill can be used in three ways:
+
+- Built-in: `pip install web2skill` and then invoke `modelscope.*` directly.
+- Standalone from a monorepo subdirectory: `web2skill skills install https://github.com/skyswordw/web2skill.git --subdir skills/modelscope`
+- Standalone from a marketplace entry: add a marketplace manifest and run `web2skill skills install modelscope@<marketplace>`
+
 ## Provider
 
 - Provider id: `modelscope`
 - Auth mode: `session`
-- Login required: `true`
+- Login required: `true` for authenticated capabilities only
 - Base URL: `https://www.modelscope.cn/`
+
+## Capability Groups
+
+### Public capabilities
+
+These do not require an authenticated ModelScope session:
+
+- `modelscope.search_models`
+- `modelscope.get_model_overview`
+- `modelscope.list_model_files`
+- `modelscope.get_quickstart`
+
+### Authenticated capabilities
+
+These require a previously captured ModelScope session:
+
+- `modelscope.get_account_profile`
+- `modelscope.list_tokens`
+- `modelscope.get_token`
+- `modelscope.create_token`
 
 ## Shared Prerequisites
 
-- Install Chromium with `uv run playwright install chromium` before interactive login flows.
-- Persist browser storage state after login so agents can reuse the same session.
+- Install Chromium with `python -m playwright install chromium` before using interactive login.
+- Capture a reusable browser session with `web2skill sessions login modelscope`.
+- Re-run login when ModelScope signs you out or when saved cookies expire.
+
+## Session Bootstrap
+
+`web2skill sessions login modelscope` supports two login modes:
+
+- `interactive`: Opens a real browser window and lets a human complete login on ModelScope. This is the most reliable option when you expect QR login, CAPTCHA, MFA, or other interactive prompts. It is slower, requires a browser UI, and waits for the bundle to detect that authentication succeeded before saving storage state.
+- `import-browser`: Reads existing ModelScope cookies from a local browser profile and writes them into Playwright storage state. This is faster and works well when you are already signed in with Chrome, Edge, Chromium, or another supported browser. It can fail if the browser has no ModelScope cookies, if local cookie access is blocked, or if the imported cookies are no longer authenticated.
+
+In practice:
+
+- Choose `interactive` when onboarding a machine for the first time or when login involves a human checkpoint.
+- Choose `import-browser` when you are already signed in locally and want the quickest non-interactive bootstrap.
 
 ## Shared Workflow
 
@@ -23,7 +68,27 @@ ModelScope skills expose normalized capability contracts for model discovery, ov
 ## Shared Recovery
 
 - If search responses drift, inspect captured network payloads before adding new selectors.
-- If the session expires, run `web2skill sessions login modelscope` again.
+- If an authenticated capability starts failing, run `web2skill sessions doctor modelscope` first, then re-run `web2skill sessions login modelscope` if needed.
+
+## `sessions doctor`
+
+`web2skill sessions doctor modelscope` is a lightweight local health check for the saved session artifact. It currently checks:
+
+- whether the expected storage-state file exists
+- whether the file can be loaded as Playwright storage state
+- whether the storage state includes at least one cookie
+
+It does not currently prove that the cookies are still valid on the remote ModelScope service. A passing doctor result means the local session file looks usable; it does not guarantee that ModelScope will still accept the session.
+
+## Storage Locations
+
+By default, this bundle stores ModelScope session artifacts in two places:
+
+- storage state: `./.web2skill/modelscope-storage-state.json` relative to the current working directory when login runs
+- interactive browser profile cache: `./.web2skill/modelscope-login-profile` relative to the current working directory when interactive login runs
+- session records: `~/.web2skill/sessions/<session-id>.json`
+
+The storage-state JSON contains browser cookies and should be treated like a local secret. The session record JSON stores an absolute path to that storage-state file together with metadata such as the generated `session_id`, provider name, and timestamps.
 
 ## Shared Human Handoff
 
@@ -84,6 +149,10 @@ Returns owner, summary, tags, stats, and metadata for a known model.
 - Strategy order: `network, dom`
 - Human confirmation required: `false`
 
+### Prerequisites
+
+- No authenticated session required for public model metadata.
+
 ### Workflow
 
 1. Load the model detail resource using the slug.
@@ -101,6 +170,10 @@ Returns normalized file entries, sizes, and paths exposed by ModelScope.
 - Strategy order: `network, dom`
 - Human confirmation required: `false`
 
+### Prerequisites
+
+- No authenticated session required for public repository file listings.
+
 ### Workflow
 
 1. Query the files endpoint for the repository tree.
@@ -113,6 +186,10 @@ Returns stable quickstart guidance to help an agent explain how to use the model
 - Risk: `low`
 - Strategy order: `network, dom`
 - Human confirmation required: `false`
+
+### Prerequisites
+
+- No authenticated session required for public quickstart extraction.
 
 ### Workflow
 
@@ -208,7 +285,7 @@ Output:
 ```json
 {
   "name": "default",
-  "token": "ms-...",
+  "token": "ms-REDACTED-EXAMPLE",
   "token_id": 3245671
 }
 ```

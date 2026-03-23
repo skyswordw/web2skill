@@ -20,8 +20,9 @@ The runtime is the stable contract boundary between agent callers, provider impl
    - guided fallback orchestration
 3. `web2skill.skills`
    - manifest schema
-   - built-in and user-installed bundle discovery
+   - built-in, marketplace-resolved, and user-installed bundle discovery
    - bundle installer and per-skill environment management
+   - marketplace catalog lookup and subdir-aware source resolution
    - capability and session-hook execution adapters
    - `SKILL.md` rendering helpers
 4. `skills/<provider>/`
@@ -35,6 +36,8 @@ The runtime is the stable contract boundary between agent callers, provider impl
 - User-installed bundles are discovered first from `~/.web2skill/skills/`
 - Built-in first-party bundles are discovered second from the packaged `web2skill/bundled_skills`
   directory inside the wheel
+- Configured marketplaces provide searchable install metadata that resolves a plugin id to a git
+  source plus an optional bundle subdirectory
 - Capability execution always flows through bundle metadata and JSON-stdio scripts rather than
   hard-coded provider imports in the CLI/runtime path
 

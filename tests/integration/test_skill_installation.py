@@ -68,6 +68,59 @@ def test_cli_installs_skill_bundle_from_git_source(
     assert installed_bundle.joinpath("skill.yaml").exists()
 
 
+def test_cli_installs_skill_bundle_from_local_subdir(
+    tmp_path: Path,
+    env_override: EnvOverride,
+) -> None:
+    home = tmp_path / "home"
+    env_override("HOME", str(home))
+    monorepo_root = tmp_path / "source" / "monorepo"
+    source_bundle = monorepo_root / "skills" / "demo"
+    _write_demo_bundle(source_bundle)
+    app = cli_module.build_app()
+
+    install = runner.invoke(
+        app,
+        ["skills", "install", str(monorepo_root), "--subdir", "skills/demo", "--json"],
+    )
+
+    assert install.exit_code == 0, install.stdout
+    payload = json.loads(install.stdout)
+    assert payload["bundle_id"] == "demo"
+    assert payload["source_descriptor"]["kind"] == "local_subdir"
+    assert payload["source_descriptor"]["path"] == str(monorepo_root.resolve())
+    assert payload["source_descriptor"]["subdir"] == "skills/demo"
+    installed_bundle = home / ".web2skill" / "skills" / "demo"
+    assert installed_bundle.joinpath("skill.yaml").exists()
+
+
+def test_cli_installs_skill_bundle_from_git_subdir(
+    tmp_path: Path,
+    env_override: EnvOverride,
+) -> None:
+    home = tmp_path / "home"
+    env_override("HOME", str(home))
+    repo_root = tmp_path / "source" / "demo-monorepo.git"
+    source_bundle = repo_root / "skills" / "demo"
+    _write_demo_bundle(source_bundle)
+    _commit_repo(repo_root)
+    app = cli_module.build_app()
+
+    install = runner.invoke(
+        app,
+        ["skills", "install", str(repo_root), "--subdir", "skills/demo", "--json"],
+    )
+
+    assert install.exit_code == 0, install.stdout
+    payload = json.loads(install.stdout)
+    assert payload["bundle_id"] == "demo"
+    assert payload["source_descriptor"]["kind"] == "git_subdir"
+    assert payload["source_descriptor"]["repo"] == str(repo_root)
+    assert payload["source_descriptor"]["subdir"] == "skills/demo"
+    installed_bundle = home / ".web2skill" / "skills" / "demo"
+    assert installed_bundle.joinpath("skill.yaml").exists()
+
+
 def test_cli_updates_local_skill_bundle_from_original_source(
     tmp_path: Path,
     env_override: EnvOverride,
@@ -97,6 +150,87 @@ def test_cli_updates_local_skill_bundle_from_original_source(
     assert 'bundle_version: "1.1.0"' in installed_manifest.read_text(encoding="utf-8")
 
 
+def test_cli_updates_and_uninstalls_bundle_using_structured_install_metadata(
+    tmp_path: Path,
+    env_override: EnvOverride,
+) -> None:
+    home = tmp_path / "home"
+    env_override("HOME", str(home))
+    monorepo_root = tmp_path / "source" / "monorepo"
+    source_bundle = monorepo_root / "skills" / "demo"
+    _write_demo_bundle(source_bundle)
+    app = cli_module.build_app()
+
+    install = runner.invoke(
+        app,
+        ["skills", "install", str(monorepo_root), "--subdir", "skills/demo", "--json"],
+    )
+
+    assert install.exit_code == 0, install.stdout
+    installed_bundle = home / ".web2skill" / "skills" / "demo"
+    metadata_path = installed_bundle / ".web2skill-install.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert metadata["source_descriptor"] == {
+        "kind": "local_subdir",
+        "path": str(monorepo_root.resolve()),
+        "subdir": "skills/demo",
+    }
+
+    source_manifest = source_bundle / "skill.yaml"
+    source_manifest.write_text(
+        source_manifest.read_text(encoding="utf-8").replace(
+            'bundle_version: "1.0.0"',
+            'bundle_version: "1.2.0"',
+        ),
+        encoding="utf-8",
+    )
+
+    update = runner.invoke(app, ["skills", "update", "demo", "--json"])
+
+    assert update.exit_code == 0, update.stdout
+    update_payload = json.loads(update.stdout)
+    assert update_payload["bundle_version"] == "1.2.0"
+    uninstall = runner.invoke(app, ["skills", "uninstall", "demo", "--json"])
+
+    assert uninstall.exit_code == 0, uninstall.stdout
+    assert not installed_bundle.exists()
+
+
+def test_cli_uninstall_restores_bundled_bundle_after_user_override(
+    tmp_path: Path,
+    env_override: EnvOverride,
+) -> None:
+    home = tmp_path / "home"
+    env_override("HOME", str(home))
+    source_bundle = tmp_path / "source" / "modelscope"
+    _write_demo_bundle(
+        source_bundle,
+        bundle_id="modelscope",
+        provider="modelscope",
+        summary="user modelscope override",
+        capability_name="modelscope.search_models",
+    )
+    app = cli_module.build_app()
+
+    install = runner.invoke(app, ["skills", "install", str(source_bundle), "--json"])
+
+    assert install.exit_code == 0, install.stdout
+    described_override = runner.invoke(app, ["skills", "describe", "modelscope", "--json"])
+
+    assert described_override.exit_code == 0, described_override.stdout
+    override_payload = json.loads(described_override.stdout)
+    assert override_payload["provider"]["summary"] == "user modelscope override"
+
+    uninstall = runner.invoke(app, ["skills", "uninstall", "modelscope", "--json"])
+
+    assert uninstall.exit_code == 0, uninstall.stdout
+    described_builtin = runner.invoke(app, ["skills", "describe", "modelscope", "--json"])
+
+    assert described_builtin.exit_code == 0, described_builtin.stdout
+    builtin_payload = json.loads(described_builtin.stdout)
+    assert builtin_payload["provider"]["summary"] != "user modelscope override"
+
+
 def test_cli_installs_bundle_with_private_env_when_bundle_requires_it(
     tmp_path: Path,
     env_override: EnvOverride,
@@ -119,23 +253,29 @@ def test_cli_installs_bundle_with_private_env_when_bundle_requires_it(
 def _write_demo_bundle(
     bundle_root: Path,
     *,
+    bundle_id: str = "demo",
+    provider: str = "demo",
+    summary: str = "demo bundle",
+    capability_name: str | None = None,
     runtime_env: str = "core",
     include_pyproject: bool = False,
 ) -> None:
+    resolved_capability_name = capability_name or f"{provider}.echo"
     capability_root = bundle_root / "scripts" / "capabilities"
     capability_root.mkdir(parents=True, exist_ok=True)
     bundle_root.joinpath("SKILL.md").write_text("# Demo\n", encoding="utf-8")
     bundle_root.joinpath("skill.yaml").write_text(
         "\n".join(
             [
-                'bundle_id: "demo"',
+                f'bundle_id: "{bundle_id}"',
                 'bundle_version: "1.0.0"',
-                'provider: "demo"',
+                f'provider: "{provider}"',
+                f'summary: "{summary}"',
                 "runtime:",
                 '  kind: "python_scripts"',
                 f'  env: "{runtime_env}"',
                 "capabilities:",
-                '  - name: "demo.echo"',
+                f'  - name: "{resolved_capability_name}"',
                 '    entry_script: "scripts/capabilities/echo.py"',
             ]
         )

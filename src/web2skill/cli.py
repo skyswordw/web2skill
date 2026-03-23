@@ -13,7 +13,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from web2skill.core.runtime import SkillRuntime
 from web2skill.core.sessions import FileSessionStore
 from web2skill.core.traces import FileTraceStore
-from web2skill.skills import BundleInstaller, SkillRegistry
+from web2skill.skills import BundleInstaller, MarketplaceRegistry, SkillRegistry
 from web2skill.skills.execution import BundleCapabilityRegistry, BundleSessionService
 
 # pyright: reportUnusedFunction=false
@@ -46,6 +46,7 @@ class CliServices:
     replay: ReplayService | None = None
     session_store: FileSessionStore | None = None
     installer: BundleInstaller | None = None
+    marketplaces: MarketplaceRegistry | None = None
 
 
 class DefaultReplayService:
@@ -69,6 +70,7 @@ def build_app(
     resolved_registry = registry or SkillRegistry.discover()
     session_store = FileSessionStore()
     trace_store = FileTraceStore()
+    marketplace_registry = MarketplaceRegistry()
     default_runtime = SkillRuntime(
         registry=BundleCapabilityRegistry(
             skill_registry=resolved_registry,
@@ -91,7 +93,8 @@ def build_app(
         ),
         replay=resolved_replay,
         session_store=session_store,
-        installer=BundleInstaller(),
+        installer=BundleInstaller(marketplaces=marketplace_registry),
+        marketplaces=marketplace_registry,
     )
 
     application = typer.Typer(
@@ -99,9 +102,11 @@ def build_app(
         no_args_is_help=True,
     )
     skills_app = typer.Typer(help="Inspect packaged provider skills.")
+    marketplaces_app = typer.Typer(help="Manage marketplace manifests.")
     sessions_app = typer.Typer(help="Manage provider login sessions.")
     replay_app = typer.Typer(help="Replay a recorded trace.")
     application.add_typer(skills_app, name="skills")
+    application.add_typer(marketplaces_app, name="marketplaces")
     application.add_typer(sessions_app, name="sessions")
     application.add_typer(replay_app, name="replay")
 
@@ -158,17 +163,51 @@ def build_app(
 
     @skills_app.command("install")
     def skills_install(
-        source: str = typer.Argument(help="Local path or git URL for a skill bundle."),
+        source: str = typer.Argument(
+            help="Local path, git URL, or <plugin_id>@<marketplace> reference."
+        ),
+        subdir: str | None = typer.Option(
+            default=None,
+            help="Subdirectory containing the skill bundle inside a repo or monorepo.",
+        ),
         as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
     ) -> None:
         if services.installer is None:
             raise typer.Exit(code=_missing_integration("skills.install"))
         try:
-            result = services.installer.install(source)
+            result = services.installer.install(source, subdir=subdir)
         except (LookupError, RuntimeError) as exc:
             raise typer.Exit(code=_usage_error(str(exc))) from exc
         services.registry = SkillRegistry.discover()
         _emit_command_result(result, as_json=as_json)
+
+    @skills_app.command("search")
+    def skills_search(
+        query: str | None = typer.Argument(
+            default=None,
+            help="Optional substring query for marketplace plugin search.",
+        ),
+        marketplace: str | None = typer.Option(
+            None,
+            "--marketplace",
+            help="Limit marketplace search to one registered alias.",
+        ),
+        as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
+    ) -> None:
+        if services.marketplaces is None:
+            raise typer.Exit(code=_missing_integration("skills.search"))
+        try:
+            matches = services.marketplaces.search(query, marketplace=marketplace)
+        except LookupError as exc:
+            raise typer.Exit(code=_usage_error(str(exc))) from exc
+        if as_json:
+            _echo_json({"matches": matches})
+            return
+        for match in matches:
+            typer.echo(
+                f"{match['plugin_id']}@{match['marketplace']}\t"
+                f"{match['display_name']}\t{match['summary']}"
+            )
 
     @skills_app.command("uninstall")
     def skills_uninstall(
@@ -196,6 +235,47 @@ def build_app(
         except LookupError as exc:
             raise typer.Exit(code=_usage_error(str(exc))) from exc
         services.registry = SkillRegistry.discover()
+        _emit_command_result(result, as_json=as_json)
+
+    @marketplaces_app.command("add")
+    def marketplaces_add(
+        alias: str = typer.Argument(help="Marketplace alias."),
+        manifest: str = typer.Argument(help="Marketplace manifest URL or local path."),
+        as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
+    ) -> None:
+        if services.marketplaces is None:
+            raise typer.Exit(code=_missing_integration("marketplaces.add"))
+        try:
+            result = services.marketplaces.add(alias, manifest)
+        except (LookupError, RuntimeError, ValueError) as exc:
+            raise typer.Exit(code=_usage_error(str(exc))) from exc
+        _emit_command_result(result, as_json=as_json)
+
+    @marketplaces_app.command("list")
+    def marketplaces_list(
+        as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
+    ) -> None:
+        if services.marketplaces is None:
+            raise typer.Exit(code=_missing_integration("marketplaces.list"))
+        payload = {
+            "marketplaces": [
+                registration.as_dict()
+                for registration in services.marketplaces.list_registrations()
+            ]
+        }
+        _emit_command_result(payload, as_json=as_json)
+
+    @marketplaces_app.command("remove")
+    def marketplaces_remove(
+        alias: str = typer.Argument(help="Marketplace alias to remove."),
+        as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
+    ) -> None:
+        if services.marketplaces is None:
+            raise typer.Exit(code=_missing_integration("marketplaces.remove"))
+        try:
+            result = services.marketplaces.remove(alias)
+        except LookupError as exc:
+            raise typer.Exit(code=_usage_error(str(exc))) from exc
         _emit_command_result(result, as_json=as_json)
 
     @application.command("invoke")

@@ -8,7 +8,8 @@ This repository is built by cooperating agents with strict write ownership. Keep
 - Python is the only primary implementation language.
 - Publish one Python package: `web2skill`.
 - First-party skills ship as bundled skill directories inside that package.
-- User-created skills are installed from a local path or git URL, not from PyPI.
+- First-party skills may also be distributed through the official marketplace manifest using a git + subdir install flow.
+- User-created skills are installed from a local path, git URL, or marketplace entry that resolves to git + optional subdir, not from PyPI.
 - Runtime inputs and outputs must be validated with Pydantic.
 - Prefer real network responses, then DOM parsing, then guided UI fallback.
 - Every invocation must emit a structured `SkillResult` with `trace_id`, `strategy_used`, and `requires_human`.
@@ -34,7 +35,7 @@ This repository is built by cooperating agents with strict write ownership. Keep
 - Model: `gpt-5.4`
 - Reasoning effort: `xhigh`
 - Write scope: repository root, `docs/`, `.github/`
-- Responsibilities: bootstrap, `pyproject.toml`, `uv` workflow, `AGENTS.md`, architecture docs, quality docs, CI
+- Responsibilities: bootstrap, `pyproject.toml`, `uv` workflow, `AGENTS.md`, marketplace docs and root marketplace manifest, architecture docs, quality docs, CI
 
 ### Runtime Agent
 
@@ -48,7 +49,7 @@ This repository is built by cooperating agents with strict write ownership. Keep
 - Model: `gpt-5.4`
 - Reasoning effort: `medium`
 - Write scope: `src/web2skill/skills/`, `src/web2skill/cli.py`, `skills/`
-- Responsibilities: manifest schema, bundle registry, installer, `SKILL.md` rendering, Typer CLI shell
+- Responsibilities: skill and marketplace manifest schema, bundle registry, installer, marketplace config persistence, `SKILL.md` rendering, Typer CLI shell
 
 ### ModelScope Provider Agent
 
@@ -68,7 +69,7 @@ This repository is built by cooperating agents with strict write ownership. Keep
 
 1. Bootstrap the repository, `uv`, CI, and onboarding docs
 2. Implement runtime contracts, browser trace, and replay
-3. Implement skill packaging and the CLI shell
+3. Implement skill packaging, marketplace install support, and the CLI shell
 4. Implement the ModelScope provider and login/session bootstrap
 5. Implement evals, drift probes, demos, and final quality gates
 
