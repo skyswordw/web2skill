@@ -1,0 +1,7 @@
+{
+  "Success": true,
+  "Data": {
+    "Path": "Qwen/Qwen2.5-7B-Instruct",
+    "Quickstart": "from modelscope import AutoModelForCausalLM"
+  }
+}

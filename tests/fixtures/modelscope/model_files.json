@@ -1,0 +1,19 @@
+{
+  "Success": true,
+  "Data": {
+    "Files": [
+      {
+        "Path": "README.md",
+        "Size": 2048
+      },
+      {
+        "Path": "config.json",
+        "Size": 1024
+      },
+      {
+        "Path": "tokenizer.json",
+        "Size": 4096
+      }
+    ]
+  }
+}

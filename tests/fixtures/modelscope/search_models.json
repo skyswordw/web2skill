@@ -1,0 +1,25 @@
+{
+  "Success": true,
+  "Data": {
+    "Models": [
+      {
+        "Name": "Qwen/Qwen2.5-7B-Instruct",
+        "Path": "Qwen/Qwen2.5-7B-Instruct",
+        "Task": "text-generation",
+        "Downloads": 987654,
+        "Likes": 4321,
+        "UpdatedAt": "2026-03-20T08:30:00Z"
+      },
+      {
+        "Name": "Qwen/Qwen2.5-3B-Instruct",
+        "Path": "Qwen/Qwen2.5-3B-Instruct",
+        "Task": "text-generation",
+        "Downloads": 456789,
+        "Likes": 2100,
+        "UpdatedAt": "2026-03-19T10:00:00Z"
+      }
+    ],
+    "Total": 2,
+    "Page": 1
+  }
+}
