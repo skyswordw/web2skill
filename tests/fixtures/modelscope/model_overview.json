@@ -1,0 +1,14 @@
+{
+  "Success": true,
+  "Data": {
+    "Path": "Qwen/Qwen2.5-7B-Instruct",
+    "Name": "Qwen2.5-7B-Instruct",
+    "Summary": "Instruction-tuned causal language model for chat and tool use.",
+    "License": "apache-2.0",
+    "Tags": [
+      "llm",
+      "text-generation",
+      "transformers"
+    ]
+  }
+}
