@@ -100,7 +100,23 @@ web2skill skills update <bundle_id>
 web2skill skills uninstall <bundle_id>
 ```
 
-官方第一方 marketplace 清单位于 [marketplace.yaml](/Volumes/DataHouse/codes/playground/web2skill/.worktrees/pypi-onboarding-release/marketplace.yaml)。marketplace 条目会解析到一个 git 仓库和可选的 bundle 子目录，这样一个 monorepo 就可以发布多个独立可安装技能，而用户不需要手动克隆整个仓库。
+官方第一方 marketplace 清单位于 [`marketplace.yaml`](./marketplace.yaml)。marketplace 条目会解析到一个 git 仓库和可选的 bundle 子目录，这样一个 monorepo 就可以发布多个独立可安装技能，而用户不需要手动克隆整个仓库。
+
+## Claude Code Marketplace 当前状态
+
+Anthropic 的 Claude Code plugin marketplace 使用的打包契约与 `web2skill` 不同。Claude Code 的 marketplace 安装要求每个插件提供 `.claude-plugin/plugin.json`，marketplace 提供 `.claude-plugin/marketplace.json`，并通过 `/plugin marketplace add ...` 和 `/plugin install plugin-name@marketplace-name` 这样的命令来安装。
+
+当前仓库还没有提供这套 Claude Code plugin 结构。现在实现的 marketplace 仅适用于 `web2skill` 自己的 runtime 和 CLI：
+
+```bash
+web2skill marketplaces add official https://raw.githubusercontent.com/skyswordw/web2skill/main/marketplace.yaml
+web2skill skills install modelscope@official
+```
+
+所以目前应当这样理解：
+
+- 如果你要使用 `web2skill`，请按照本 README 中的 `web2skill` CLI 流程安装。
+- 如果你要直接通过 Claude Code marketplace 安装，这个仓库目前还不支持，应视为后续里程碑工作。
 
 ## 从源码开发
 

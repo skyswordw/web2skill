@@ -12,7 +12,9 @@ This skill can be used in three ways:
 
 - Built-in: `pip install web2skill` and then invoke `modelscope.*` directly.
 - Standalone from a monorepo subdirectory: `web2skill skills install https://github.com/skyswordw/web2skill.git --subdir skills/modelscope`
-- Standalone from a marketplace entry: add a marketplace manifest and run `web2skill skills install modelscope@<marketplace>`
+- Standalone from a `web2skill` marketplace entry: add a marketplace manifest and run `web2skill skills install modelscope@<marketplace>`
+
+This is not the same as Anthropic Claude Code's native plugin marketplace format. This bundle currently installs through the `web2skill` CLI, not through Claude Code's `/plugin install ...` flow.
 
 ## Provider
 
