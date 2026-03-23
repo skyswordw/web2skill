@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import json
+import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, cast
 
 import typer
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from web2skill.core.runtime import SkillRuntime
+from web2skill.core.sessions import FileSessionStore, SessionRecord
+from web2skill.core.traces import FileTraceStore
+from web2skill.providers.modelscope.login import bootstrap_interactive_login, doctor_storage_state
+from web2skill.providers.modelscope.provider import ModelScopeRegistry
 from web2skill.skills import SkillRegistry
 
 # pyright: reportUnusedFunction=false
@@ -18,7 +24,7 @@ class InvocationRuntime(Protocol):
     def invoke(
         self,
         capability_name: str,
-        payload: Mapping[str, Any],
+        payload: dict[str, object] | BaseModel,
         session_id: str | None = None,
     ) -> Any: ...
 
@@ -39,6 +45,55 @@ class CliServices:
     runtime: InvocationRuntime | None = None
     sessions: SessionService | None = None
     replay: ReplayService | None = None
+    session_store: FileSessionStore | None = None
+
+
+class DefaultSessionService:
+    def __init__(self, session_store: FileSessionStore) -> None:
+        self._session_store = session_store
+
+    def login(self, provider: str) -> Any:
+        if provider != "modelscope":
+            msg = f"unsupported provider '{provider}'"
+            raise LookupError(msg)
+        result = bootstrap_interactive_login()
+        payload = result.model_dump(mode="json")
+        if result.authenticated:
+            session_id = f"{provider}-{uuid.uuid4().hex[:12]}"
+            session = SessionRecord.create(
+                session_id=session_id,
+                provider_name=provider,
+                storage_state_path=Path(result.storage_state_path),
+                base_url="https://www.modelscope.cn",
+            )
+            self._session_store.put(session)
+            payload["session_id"] = session_id
+        return payload
+
+    def doctor(self, provider: str) -> Any:
+        if provider != "modelscope":
+            msg = f"unsupported provider '{provider}'"
+            raise LookupError(msg)
+        sessions = self._session_store.list(provider_name=provider)
+        latest = sessions[0] if sessions else None
+        ok, message = doctor_storage_state(latest.storage_state_path if latest else None)
+        return {
+            "provider": provider,
+            "ok": ok,
+            "message": message,
+            "session_id": latest.session_id if latest else None,
+            "storage_state_path": (
+                str(latest.storage_state_path) if latest and latest.storage_state_path else None
+            ),
+        }
+
+
+class DefaultReplayService:
+    def __init__(self, runtime: SkillRuntime) -> None:
+        self._runtime = runtime
+
+    def run(self, trace_id: str) -> Any:
+        return self._runtime.replay(trace_id)
 
 
 JsonMapping = TypeAdapter(dict[str, Any])
@@ -51,11 +106,23 @@ def build_app(
     sessions: SessionService | None = None,
     replay: ReplayService | None = None,
 ) -> typer.Typer:
+    resolved_registry = registry or SkillRegistry.discover()
+    session_store = FileSessionStore()
+    default_runtime = SkillRuntime(
+        registry=ModelScopeRegistry(session_store=session_store),
+        session_store=session_store,
+        trace_store=FileTraceStore(),
+    )
+    resolved_runtime: InvocationRuntime = runtime or default_runtime
+    resolved_replay = replay
+    if resolved_replay is None and isinstance(resolved_runtime, SkillRuntime):
+        resolved_replay = DefaultReplayService(resolved_runtime)
     services = CliServices(
-        registry=registry or SkillRegistry.discover(),
-        runtime=runtime,
-        sessions=sessions,
-        replay=replay,
+        registry=resolved_registry,
+        runtime=resolved_runtime,
+        sessions=sessions or DefaultSessionService(session_store),
+        replay=resolved_replay,
+        session_store=session_store,
     )
 
     application = typer.Typer(
@@ -76,7 +143,13 @@ def build_app(
     ) -> None:
         capabilities = services.registry.list_capabilities(provider=provider)
         if as_json:
-            _echo_json({"capabilities": [capability.model_dump(mode="json") for capability in capabilities]})
+            _echo_json(
+                {
+                    "capabilities": [
+                        capability.model_dump(mode="json") for capability in capabilities
+                    ]
+                }
+            )
             return
         for capability in capabilities:
             typer.echo(f"{capability.name}\t{capability.summary}")
@@ -132,7 +205,14 @@ def build_app(
         payload = _load_input_payload(input_value)
         if services.runtime is None:
             raise typer.Exit(code=_missing_integration("runtime.invoke"))
-        result = services.runtime.invoke(capability, payload, session_id=session_id)
+        resolved_session_id = session_id or _latest_session_id(services, capability)
+        try:
+            result = services.runtime.invoke(capability, payload, session_id=resolved_session_id)
+        except Exception as exc:
+            if as_json:
+                _echo_json(_json_failure_envelope(exc))
+                return
+            raise typer.Exit(code=_usage_error(str(exc))) from exc
         _emit_command_result(result, as_json=as_json)
 
     @sessions_app.command("login")
@@ -207,6 +287,21 @@ def _echo_json(payload: Any) -> None:
     typer.echo(json.dumps(payload, indent=2, sort_keys=True))
 
 
+def _json_failure_envelope(exc: Exception) -> dict[str, Any]:
+    return {
+        "trace_id": uuid.uuid4().hex,
+        "strategy_used": "network",
+        "requires_human": True,
+        "errors": [
+            {
+                "code": "invoke_error",
+                "message": str(exc),
+                "retriable": False,
+            }
+        ],
+    }
+
+
 def _validate_provider(registry: SkillRegistry, provider: str) -> None:
     try:
         registry.get_provider(provider)
@@ -225,6 +320,16 @@ def _missing_integration(name: str) -> int:
         err=True,
     )
     return 2
+
+
+def _latest_session_id(services: CliServices, capability_name: str) -> str | None:
+    provider_name, _, _ = capability_name.partition(".")
+    if services.session_store is None or not provider_name:
+        return None
+    sessions = services.session_store.list(provider_name=provider_name)
+    if not sessions:
+        return None
+    return sessions[0].session_id
 
 
 app: typer.Typer = build_app()

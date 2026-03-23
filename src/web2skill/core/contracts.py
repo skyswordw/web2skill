@@ -5,7 +5,8 @@ from enum import StrEnum
 from typing import Annotated
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue as PydanticJsonValue, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import JsonValue as PydanticJsonValue
 
 
 def utc_now() -> datetime:

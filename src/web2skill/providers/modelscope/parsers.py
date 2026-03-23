@@ -74,9 +74,13 @@ def _as_str(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def normalize_search_results(payload: dict[str, Any], query: str, page: int) -> SearchModelsOutput:
-    data_block = _dict_from(payload.get("Data"))
+def normalize_search_results(
+    payload: dict[str, Any], query: str | None = None, page: int = 1
+) -> list[ModelSearchItem]:
+    data_block = _data_block(payload)
     model_block = _dict_from(data_block.get("Model"))
+    if not model_block and isinstance(data_block.get("Models"), list):
+        model_block = data_block
     items: list[ModelSearchItem] = []
     raw_models = _list_from(model_block.get("Models"))
     for entry in raw_models:
@@ -102,39 +106,50 @@ def normalize_search_results(payload: dict[str, Any], query: str, page: int) -> 
                 model_url=model_slug_to_url(model_slug),
             )
         )
+    return items
+
+
+def build_search_models_output(
+    payload: dict[str, Any], *, query: str, page: int
+) -> SearchModelsOutput:
+    data_block = _data_block(payload)
+    model_block = _dict_from(data_block.get("Model"))
+    if not model_block and isinstance(data_block.get("Models"), list):
+        model_block = data_block
     return SearchModelsOutput(
         query=query,
-        total_count=_as_int(model_block.get("TotalCount")),
+        total_count=_as_int(model_block.get("TotalCount")) or _as_int(data_block.get("Total")),
         page=page,
-        items=items,
+        items=normalize_search_results(payload, query=query, page=page),
     )
 
 
 def normalize_model_overview(payload: dict[str, Any]) -> ModelOverview:
-    model_slug = _build_model_slug(payload)
+    source = _data_block(payload)
+    model_slug = _build_model_slug(source)
     if not model_slug:
         raise ValueError("Model payload did not include a usable model slug.")
 
     return ModelOverview(
         model_slug=model_slug,
-        name=_as_str(payload.get("Name")) or model_slug.rsplit("/", 1)[-1],
-        chinese_name=_as_str(payload.get("ChineseName")),
-        headline=_as_str(payload.get("Description")),
-        description=_as_str(payload.get("Description")),
-        downloads=_as_int(payload.get("Downloads")),
-        stars=_as_int(payload.get("Stars")),
-        revision=_as_str(payload.get("Revision")),
-        license=_as_str(payload.get("License")),
-        tasks=_task_names(payload.get("Tasks")),
-        frameworks=_string_list(payload.get("Frameworks")),
-        libraries=_string_list(payload.get("Libraries")),
-        languages=_string_list(payload.get("Language")),
-        tags=_string_list(payload.get("Tags")),
-        base_models=_string_list(payload.get("BaseModel")),
-        storage_size=_as_int(payload.get("StorageSize")),
-        updated_at=parse_unix_timestamp(payload.get("LastUpdatedTime")),
-        organization=_organization_from_payload(payload.get("Organization")),
-        readme_markdown=_as_str(payload.get("ReadMeContent")),
+        name=_as_str(source.get("Name")) or model_slug.rsplit("/", 1)[-1],
+        chinese_name=_as_str(source.get("ChineseName")),
+        headline=_as_str(source.get("Summary")) or _as_str(source.get("Description")),
+        description=_as_str(source.get("Description")) or _as_str(source.get("Summary")),
+        downloads=_as_int(source.get("Downloads")),
+        stars=_as_int(source.get("Stars")),
+        revision=_as_str(source.get("Revision")),
+        license=_as_str(source.get("License")),
+        tasks=_task_names(source.get("Tasks")),
+        frameworks=_string_list(source.get("Frameworks")),
+        libraries=_string_list(source.get("Libraries")),
+        languages=_string_list(source.get("Language")),
+        tags=_string_list(source.get("Tags")),
+        base_models=_string_list(source.get("BaseModel")),
+        storage_size=_as_int(source.get("StorageSize")),
+        updated_at=parse_unix_timestamp(source.get("LastUpdatedTime")),
+        organization=_organization_from_payload(source.get("Organization")),
+        readme_markdown=_as_str(source.get("ReadMeContent")) or _as_str(source.get("Quickstart")),
         model_url=model_slug_to_url(model_slug),
     )
 
@@ -143,7 +158,7 @@ def normalize_repo_files(
     payload: dict[str, Any], *, model_slug: str, revision: str | None
 ) -> ListModelFilesOutput:
     files: list[ModelFileEntry] = []
-    data_block = _dict_from(payload.get("Data"))
+    data_block = _data_block(payload)
     raw_files = _list_from(data_block.get("Files"))
     for entry in raw_files:
         if not isinstance(entry, dict):
@@ -163,6 +178,11 @@ def normalize_repo_files(
             )
         )
     return ListModelFilesOutput(model_slug=model_slug, revision=revision, files=files)
+
+
+def normalize_model_files(payload: dict[str, Any]) -> list[ModelFileEntry]:
+    normalized = normalize_repo_files(payload, model_slug=_infer_model_slug(payload), revision=None)
+    return normalized.files
 
 
 def extract_quickstart_from_markdown(model_slug: str, markdown: str | None) -> QuickstartSnippet:
@@ -219,6 +239,10 @@ def _string_list(value: Any) -> list[str]:
 def _build_model_slug(payload: dict[str, Any]) -> str | None:
     path = _as_str(payload.get("Path"))
     name = _as_str(payload.get("Name"))
+    if name and "/" in name:
+        return name
+    if path and "/" in path:
+        return path
     if path and name:
         return f"{path}/{name}"
     return _as_str(payload.get("ModelId")) or _as_str(payload.get("model_id"))
@@ -248,3 +272,13 @@ def _dict_from(value: Any) -> dict[str, Any]:
 
 def _list_from(value: Any) -> list[Any]:
     return cast(list[Any], value) if isinstance(value, list) else []
+
+
+def _data_block(payload: dict[str, Any]) -> dict[str, Any]:
+    data = _dict_from(payload.get("Data"))
+    return data or payload
+
+
+def _infer_model_slug(payload: dict[str, Any]) -> str:
+    data = _data_block(payload)
+    return _build_model_slug(data) or "unknown/unknown"

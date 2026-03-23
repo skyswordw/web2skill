@@ -23,7 +23,7 @@ from .login import (
     save_storage_state,
     storage_state_cookies,
 )
-from .provider import ModelScopeProvider
+from .provider import ModelScopeProvider, ModelScopeRegistry
 
 __all__ = [
     "CapabilityName",
@@ -33,6 +33,7 @@ __all__ = [
     "LoginBootstrapResult",
     "ModelOverview",
     "ModelScopeProvider",
+    "ModelScopeRegistry",
     "ModelSearchItem",
     "ModelSlugInput",
     "QuickstartSnippet",

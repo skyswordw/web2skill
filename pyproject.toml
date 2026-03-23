@@ -33,6 +33,9 @@ dev = [
 [project.urls]
 Homepage = "https://github.com/example/web2skill"
 
+[project.scripts]
+web2skill = "web2skill.cli:app"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/web2skill"]
 
@@ -64,4 +67,3 @@ typeCheckingMode = "strict"
 venvPath = "."
 venv = ".venv"
 reportMissingTypeStubs = false
-

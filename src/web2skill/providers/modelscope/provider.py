@@ -6,6 +6,24 @@ from typing import Any
 import httpx
 from pydantic import ValidationError
 
+from web2skill.core.contracts import (
+    CapabilityDescriptor as CoreCapabilityDescriptor,
+)
+from web2skill.core.contracts import (
+    ExecutionContext,
+    RiskLevel,
+)
+from web2skill.core.contracts import (
+    SkillError as CoreSkillError,
+)
+from web2skill.core.contracts import (
+    SkillResult as CoreSkillResult,
+)
+from web2skill.core.contracts import (
+    Strategy as CoreStrategy,
+)
+from web2skill.core.sessions import SessionStore
+
 from .contracts import (
     AccountProfile,
     CapabilityName,
@@ -16,18 +34,20 @@ from .contracts import (
     QuickstartSnippet,
     SearchModelsInput,
     SearchModelsOutput,
-    SkillResult,
     StrategyUsed,
     TraceEvent,
 )
+from .contracts import (
+    SkillResult as ProviderSkillResult,
+)
 from .login import storage_state_cookies
 from .parsers import (
+    build_search_models_output,
     extract_embedded_detail_data,
     extract_quickstart_from_markdown,
     normalize_account_profile,
     normalize_model_overview,
     normalize_repo_files,
-    normalize_search_results,
 )
 from .selectors import (
     BASE_URL,
@@ -72,7 +92,7 @@ class ModelScopeProvider:
     def __exit__(self, *_: object) -> None:
         self.close()
 
-    def invoke(self, capability_name: str, payload: dict[str, Any]) -> SkillResult[Any]:
+    def invoke(self, capability_name: str, payload: dict[str, Any]) -> ProviderSkillResult[Any]:
         capability = CapabilityName(capability_name)
         handlers = {
             CapabilityName.SEARCH_MODELS: self.search_models,
@@ -83,7 +103,10 @@ class ModelScopeProvider:
         }
         return handlers[capability](payload)
 
-    def search_models(self, payload: dict[str, Any]) -> SkillResult[SearchModelsOutput]:
+    def capabilities(self) -> list[str]:
+        return [capability.value for capability in CapabilityName]
+
+    def search_models(self, payload: dict[str, Any]) -> ProviderSkillResult[SearchModelsOutput]:
         trace_id = uuid.uuid4().hex
         try:
             request = SearchModelsInput.model_validate(payload)
@@ -117,8 +140,8 @@ class ModelScopeProvider:
                 strategy=StrategyUsed.NETWORK,
             )
         )
-        normalized = normalize_search_results(data, request.query, request.page)
-        return SkillResult(
+        normalized = build_search_models_output(data, query=request.query, page=request.page)
+        return ProviderSkillResult(
             trace_id=trace_id,
             capability=CapabilityName.SEARCH_MODELS,
             strategy_used=StrategyUsed.NETWORK,
@@ -127,7 +150,7 @@ class ModelScopeProvider:
             trace=trace,
         )
 
-    def get_model_overview(self, payload: dict[str, Any]) -> SkillResult[ModelOverview]:
+    def get_model_overview(self, payload: dict[str, Any]) -> ProviderSkillResult[ModelOverview]:
         trace_id = uuid.uuid4().hex
         try:
             request = ModelSlugInput.model_validate(payload)
@@ -140,7 +163,9 @@ class ModelScopeProvider:
             model_slug=request.model_slug,
         )
 
-    def list_model_files(self, payload: dict[str, Any]) -> SkillResult[ListModelFilesOutput]:
+    def list_model_files(
+        self, payload: dict[str, Any]
+    ) -> ProviderSkillResult[ListModelFilesOutput]:
         trace_id = uuid.uuid4().hex
         try:
             request = ModelSlugInput.model_validate(payload)
@@ -187,7 +212,7 @@ class ModelScopeProvider:
                 ),
             ]
         )
-        return SkillResult(
+        return ProviderSkillResult(
             trace_id=trace_id,
             capability=CapabilityName.LIST_MODEL_FILES,
             strategy_used=StrategyUsed.NETWORK,
@@ -196,7 +221,7 @@ class ModelScopeProvider:
             trace=trace,
         )
 
-    def get_quickstart(self, payload: dict[str, Any]) -> SkillResult[QuickstartSnippet]:
+    def get_quickstart(self, payload: dict[str, Any]) -> ProviderSkillResult[QuickstartSnippet]:
         trace_id = uuid.uuid4().hex
         try:
             request = ModelSlugInput.model_validate(payload)
@@ -210,7 +235,7 @@ class ModelScopeProvider:
         )
         overview = detail_result.data
         if overview is None:
-            return SkillResult(
+            return ProviderSkillResult(
                 trace_id=trace_id,
                 capability=CapabilityName.GET_QUICKSTART,
                 strategy_used=detail_result.strategy_used,
@@ -228,7 +253,7 @@ class ModelScopeProvider:
                 strategy=detail_result.strategy_used,
             )
         )
-        return SkillResult(
+        return ProviderSkillResult(
             trace_id=trace_id,
             capability=CapabilityName.GET_QUICKSTART,
             strategy_used=detail_result.strategy_used,
@@ -237,7 +262,7 @@ class ModelScopeProvider:
             trace=trace,
         )
 
-    def get_account_profile(self, payload: dict[str, Any]) -> SkillResult[AccountProfile]:
+    def get_account_profile(self, payload: dict[str, Any]) -> ProviderSkillResult[AccountProfile]:
         trace_id = uuid.uuid4().hex
         try:
             GetAccountProfileInput.model_validate(payload)
@@ -263,7 +288,7 @@ class ModelScopeProvider:
                     strategy=StrategyUsed.NETWORK,
                 )
             )
-            return SkillResult(
+            return ProviderSkillResult(
                 trace_id=trace_id,
                 capability=CapabilityName.GET_ACCOUNT_PROFILE,
                 strategy_used=StrategyUsed.NETWORK,
@@ -281,7 +306,7 @@ class ModelScopeProvider:
                 strategy=StrategyUsed.NETWORK,
             )
         )
-        return SkillResult(
+        return ProviderSkillResult(
             trace_id=trace_id,
             capability=CapabilityName.GET_ACCOUNT_PROFILE,
             strategy_used=StrategyUsed.NETWORK,
@@ -296,7 +321,7 @@ class ModelScopeProvider:
         trace_id: str,
         capability: CapabilityName,
         model_slug: str,
-    ) -> SkillResult[ModelOverview]:
+    ) -> ProviderSkillResult[ModelOverview]:
         trace = [
             TraceEvent(
                 stage="request_validation",
@@ -335,7 +360,7 @@ class ModelScopeProvider:
         detail_payload.setdefault("Path", model_slug.split("/", 1)[0])
         detail_payload.setdefault("Name", model_slug.split("/", 1)[1])
         overview = normalize_model_overview(detail_payload)
-        return SkillResult(
+        return ProviderSkillResult(
             trace_id=trace_id,
             capability=capability,
             strategy_used=strategy,
@@ -367,8 +392,8 @@ class ModelScopeProvider:
         trace_id: str,
         capability: CapabilityName,
         exc: ValidationError,
-    ) -> SkillResult[Any]:
-        return SkillResult(
+    ) -> ProviderSkillResult[Any]:
+        return ProviderSkillResult(
             trace_id=trace_id,
             capability=capability,
             strategy_used=StrategyUsed.NETWORK,
@@ -406,3 +431,124 @@ class ModelScopeProvider:
             if isinstance(name, str) and isinstance(value, str):
                 cookie_map[name] = value
         return cookie_map
+
+
+class _ModelScopeHandler:
+    def __init__(self, registry: ModelScopeRegistry, capability_name: str) -> None:
+        self._registry = registry
+        self._capability_name = capability_name
+
+    def execute(self, context: ExecutionContext) -> CoreSkillResult:
+        session = (
+            self._registry.session_store.get(context.session_id) if context.session_id else None
+        )
+        storage_state_path = None
+        if session is not None and session.storage_state_path is not None:
+            storage_state_path = str(session.storage_state_path)
+
+        with ModelScopeProvider(
+            storage_state_path=storage_state_path,
+            timeout_seconds=self._registry.timeout_seconds,
+            transport=self._registry.transport,
+        ) as provider:
+            provider_result = provider.invoke(self._capability_name, context.payload)
+        return _to_core_result(provider_result, context)
+
+
+class ModelScopeRegistry:
+    def __init__(
+        self,
+        *,
+        session_store: SessionStore,
+        timeout_seconds: float = 30.0,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self.session_store = session_store
+        self.timeout_seconds = timeout_seconds
+        self.transport = transport
+
+    def capabilities(self) -> list[str]:
+        return [capability.value for capability in CapabilityName]
+
+    def get_descriptor(self, capability_name: str) -> CoreCapabilityDescriptor:
+        capability = CapabilityName(capability_name)
+        descriptors = {
+            CapabilityName.SEARCH_MODELS: CoreCapabilityDescriptor(
+                capability_name=capability.value,
+                provider_name="modelscope",
+                risk_level=RiskLevel.LOW,
+                supported_strategies=(CoreStrategy.NETWORK,),
+                input_model=SearchModelsInput,
+            ),
+            CapabilityName.GET_MODEL_OVERVIEW: CoreCapabilityDescriptor(
+                capability_name=capability.value,
+                provider_name="modelscope",
+                risk_level=RiskLevel.LOW,
+                supported_strategies=(CoreStrategy.NETWORK, CoreStrategy.DOM),
+                input_model=ModelSlugInput,
+            ),
+            CapabilityName.LIST_MODEL_FILES: CoreCapabilityDescriptor(
+                capability_name=capability.value,
+                provider_name="modelscope",
+                risk_level=RiskLevel.LOW,
+                supported_strategies=(CoreStrategy.NETWORK,),
+                input_model=ModelSlugInput,
+            ),
+            CapabilityName.GET_QUICKSTART: CoreCapabilityDescriptor(
+                capability_name=capability.value,
+                provider_name="modelscope",
+                risk_level=RiskLevel.LOW,
+                supported_strategies=(CoreStrategy.NETWORK, CoreStrategy.DOM),
+                input_model=ModelSlugInput,
+            ),
+            CapabilityName.GET_ACCOUNT_PROFILE: CoreCapabilityDescriptor(
+                capability_name=capability.value,
+                provider_name="modelscope",
+                risk_level=RiskLevel.LOW,
+                supported_strategies=(CoreStrategy.NETWORK,),
+                input_model=GetAccountProfileInput,
+            ),
+        }
+        return descriptors[capability]
+
+    def get_handler(self, capability_name: str) -> _ModelScopeHandler:
+        return _ModelScopeHandler(self, capability_name)
+
+    def resolve(self, capability_name: str) -> _ModelScopeHandler:
+        return self.get_handler(capability_name)
+
+
+def _to_core_result(
+    provider_result: ProviderSkillResult[Any], context: ExecutionContext
+) -> CoreSkillResult:
+    output: dict[str, Any] | list[Any] | str | int | float | bool | None
+    if provider_result.data is None:
+        output = None
+    elif hasattr(provider_result.data, "model_dump"):
+        output = provider_result.data.model_dump(mode="json")
+    else:
+        output = provider_result.data
+
+    errors = tuple(
+        CoreSkillError(code="provider_error", message=message, retriable=False)
+        for message in provider_result.errors
+    )
+    return CoreSkillResult(
+        trace_id=provider_result.trace_id,
+        capability_name=context.capability_name,
+        strategy_used=_to_core_strategy(provider_result.strategy_used),
+        requires_human=provider_result.requires_human,
+        output=output,
+        errors=errors,
+        session_id=context.session_id,
+        metadata={"provider": "modelscope"},
+    )
+
+
+def _to_core_strategy(strategy: StrategyUsed) -> CoreStrategy:
+    mapping = {
+        StrategyUsed.NETWORK: CoreStrategy.NETWORK,
+        StrategyUsed.DOM: CoreStrategy.DOM,
+        StrategyUsed.GUIDED_UI: CoreStrategy.GUIDED_UI,
+    }
+    return mapping[strategy]

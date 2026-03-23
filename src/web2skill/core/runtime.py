@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Protocol
+from collections.abc import Callable
+from typing import Protocol, cast
 
 from pydantic import BaseModel
 
@@ -153,12 +154,15 @@ class SkillRuntime:
         msg = f"Registry cannot resolve capability '{capability_name}'."
         raise RuntimeDispatchError(msg)
 
-    def _execute_handler(self, handler: CapabilityHandler, context: ExecutionContext) -> SkillResult:
+    def _execute_handler(
+        self, handler: CapabilityHandler, context: ExecutionContext
+    ) -> SkillResult:
         if hasattr(handler, "execute"):
             return handler.execute(context)
 
         if callable(handler):
-            raw_result = handler(context.payload, session_id=context.session_id)
+            callable_handler = cast(Callable[..., object], handler)
+            raw_result = callable_handler(context.payload, session_id=context.session_id)
             if isinstance(raw_result, SkillResult):
                 return raw_result
             if isinstance(raw_result, dict):
