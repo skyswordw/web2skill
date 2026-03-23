@@ -13,3 +13,4 @@ htmlcov/
 coverage.xml
 .DS_Store
 .worktrees/
+.web2skill/

@@ -29,7 +29,8 @@ Each milestone must complete:
 A release candidate is ready when:
 
 - a fresh clone can bootstrap with one `uv sync --dev`
+- the built wheel contains bundled first-party skills and works without a repo checkout
+- user-installed bundles can be installed from a local path or git URL
 - a single login can be reused across all supported capabilities
 - all capability responses are stable JSON with `trace_id`
 - the login -> search -> overview -> files -> quickstart demo path works
-

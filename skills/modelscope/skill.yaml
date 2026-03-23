@@ -1,8 +1,10 @@
 schema_version: "1.0"
+bundle_id: "modelscope"
+bundle_version: "1.0.0"
 provider: "modelscope"
 provider_display_name: "ModelScope"
 summary: "Browse stable public ModelScope metadata and account profile details."
-description: "ModelScope skills expose normalized read-only capability contracts for model discovery, overview inspection, file listing, quickstart extraction, and authenticated profile lookup."
+description: "ModelScope skills expose normalized capability contracts for model discovery, overview inspection, file listing, quickstart extraction, authenticated profile lookup, and access-token management."
 base_url: "https://www.modelscope.cn"
 auth:
   mode: "session"
@@ -11,6 +13,12 @@ auth:
   notes:
     - "Use Playwright storage state reuse after an interactive login bootstrap."
     - "Keep authenticated session handling outside the packaged skill metadata."
+runtime:
+  kind: "python_scripts"
+  env: "core"
+session_hooks:
+  login_script: "scripts/session/login.py"
+  doctor_script: "scripts/session/doctor.py"
 prerequisites:
   - "Install Chromium with `uv run playwright install chromium` before interactive login flows."
   - "Persist browser storage state after login so agents can reuse the same session."
@@ -25,6 +33,7 @@ human_handoff:
   - "Ask a human to complete interactive login or MFA challenges."
 capabilities:
   - name: "modelscope.search_models"
+    entry_script: "scripts/capabilities/search_models.py"
     summary: "Search public models by query, task, ranking, and page."
     description: "Returns normalized model search results without mutating remote state."
     risk: "low"
@@ -71,6 +80,7 @@ capabilities:
             - model_slug: "Qwen/Qwen2.5-7B-Instruct"
           total: 1
   - name: "modelscope.get_model_overview"
+    entry_script: "scripts/capabilities/get_model_overview.py"
     summary: "Fetch the normalized overview for a specific model slug."
     description: "Returns owner, summary, tags, stats, and metadata for a known model."
     risk: "low"
@@ -96,6 +106,7 @@ capabilities:
     recovery:
       - "Fallback to stable DOM anchors on the model overview page."
   - name: "modelscope.list_model_files"
+    entry_script: "scripts/capabilities/list_model_files.py"
     summary: "List repository files for a given model."
     description: "Returns normalized file entries, sizes, and paths exposed by ModelScope."
     risk: "low"
@@ -119,6 +130,7 @@ capabilities:
       - "Query the files endpoint for the repository tree."
       - "Normalize file names, paths, sizes, and directory markers."
   - name: "modelscope.get_quickstart"
+    entry_script: "scripts/capabilities/get_quickstart.py"
     summary: "Extract the quickstart or usage section for a model."
     description: "Returns stable quickstart guidance to help an agent explain how to use the model."
     risk: "low"
@@ -144,11 +156,13 @@ capabilities:
     recovery:
       - "If no quickstart exists, return an empty normalized section with source metadata."
   - name: "modelscope.get_account_profile"
+    entry_script: "scripts/capabilities/get_account_profile.py"
     summary: "Fetch the authenticated account profile for the current user."
     description: "Returns normalized profile details from an already-authenticated ModelScope session."
     risk: "medium"
-    strategies: ["network", "dom", "ui"]
+    strategies: ["network", "dom", "guided_ui"]
     requires_confirmation: false
+    session_required: true
     input_schema:
       type: "object"
       properties: {}
@@ -171,3 +185,115 @@ capabilities:
       - "If session reuse fails, trigger the login bootstrap flow."
     human_handoff:
       - "Escalate if the account requires CAPTCHA, MFA, or other interactive approval."
+  - name: "modelscope.list_tokens"
+    entry_script: "scripts/capabilities/list_tokens.py"
+    summary: "List ModelScope access-token metadata for the current account."
+    description: "Returns non-secret token metadata such as id, name, creation time, and expiry."
+    risk: "medium"
+    strategies: ["network", "dom"]
+    requires_confirmation: false
+    session_required: true
+    input_schema:
+      type: "object"
+      properties: {}
+      additionalProperties: false
+    output_schema:
+      type: "object"
+      properties:
+        items:
+          type: "array"
+        total_count:
+          type: "integer"
+    prerequisites:
+      - "An existing authenticated browser session is required."
+    workflows:
+      - "Read token metadata from the authenticated token-management API."
+      - "Return only non-secret metadata in the list response."
+    recovery:
+      - "If the token API drifts, inspect the authenticated account token page network calls."
+  - name: "modelscope.get_token"
+    entry_script: "scripts/capabilities/get_token.py"
+    summary: "Reveal the raw ModelScope access token for a selected token id."
+    description: "Returns a raw token string for one selected token only after explicit confirmation."
+    risk: "high"
+    strategies: ["network", "dom"]
+    requires_confirmation: true
+    confirmation_field: "confirm_reveal"
+    session_required: true
+    input_schema:
+      type: "object"
+      properties:
+        token_id:
+          type: "integer"
+        confirm_reveal:
+          type: "boolean"
+          default: false
+      required: ["token_id"]
+      additionalProperties: false
+    output_schema:
+      type: "object"
+      properties:
+        token_id:
+          type: "integer"
+        name:
+          type: "string"
+        token:
+          type: "string"
+        expires_at:
+          type: "string"
+    prerequisites:
+      - "An existing authenticated browser session is required."
+    workflows:
+      - "Read the authenticated token list."
+      - "Select the requested token by id and reveal the raw token only when explicitly confirmed."
+    human_handoff:
+      - "Escalate if the session is expired or additional account approval is required."
+    examples:
+      - name: "Reveal the default token"
+        description: "Return the raw token value for one selected token."
+        input:
+          token_id: 3245671
+          confirm_reveal: true
+        output:
+          token_id: 3245671
+          name: "default"
+          token: "ms-..."
+  - name: "modelscope.create_token"
+    entry_script: "scripts/capabilities/create_token.py"
+    summary: "Create a new ModelScope access token for the current account."
+    description: "Creates a new token only after explicit confirmation and returns the created raw token."
+    risk: "high"
+    strategies: ["network", "guided_ui"]
+    requires_confirmation: true
+    confirmation_field: "confirm_create"
+    session_required: true
+    input_schema:
+      type: "object"
+      properties:
+        name:
+          type: "string"
+        validity:
+          type: "string"
+          enum: ["permanent", "short_term"]
+          default: "permanent"
+        confirm_create:
+          type: "boolean"
+          default: false
+      required: ["name"]
+      additionalProperties: false
+    output_schema:
+      type: "object"
+      properties:
+        token_id:
+          type: "integer"
+        name:
+          type: "string"
+        token:
+          type: "string"
+    prerequisites:
+      - "An existing authenticated browser session is required."
+    workflows:
+      - "Prefer a stable authenticated create-token API if one is available."
+      - "Use guided UI fallback only for the bounded create-token flow when needed."
+    human_handoff:
+      - "Escalate if the session is expired, the token quota is exhausted, or a human must confirm account actions."

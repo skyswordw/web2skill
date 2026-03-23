@@ -43,12 +43,14 @@ class GuardrailEngine(RuntimeBaseModel):
                     GuardrailWarning(
                         code=self.guided_ui_warning_code,
                         message=(
-                            "Guided UI fallback requires a reusable session "
-                            "or a human login step."
+                            "Guided UI fallback requires a reusable session or a human login step."
                         ),
                     )
                 )
-            if self._risk_meets_threshold(context.risk_level, self.interactive_risk_threshold):
+            if (
+                self._risk_meets_threshold(context.risk_level, self.interactive_risk_threshold)
+                and not context.human_confirmation_granted
+            ):
                 requires_human = True
                 warnings.append(
                     GuardrailWarning(
@@ -57,7 +59,11 @@ class GuardrailEngine(RuntimeBaseModel):
                     )
                 )
 
-        if context.risk_level is RiskLevel.HIGH and not self.allow_high_risk_automation:
+        if (
+            context.risk_level is RiskLevel.HIGH
+            and not self.allow_high_risk_automation
+            and not context.human_confirmation_granted
+        ):
             requires_human = True
             warnings.append(
                 GuardrailWarning(
@@ -78,6 +84,20 @@ class GuardrailEngine(RuntimeBaseModel):
         return SkillError(
             code="session_required",
             message="This capability requires a previously established session.",
+            retriable=True,
+        )
+
+    def require_confirmation(
+        self, context: ExecutionContext, confirmation_field: str
+    ) -> SkillError | None:
+        if context.human_confirmation_granted:
+            return None
+        return SkillError(
+            code="confirmation_required",
+            message=(
+                "This capability requires explicit human confirmation. "
+                f"Set '{confirmation_field}' to true to proceed."
+            ),
             retriable=True,
         )
 

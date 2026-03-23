@@ -1,0 +1,1 @@
+"""ModelScope capability entrypoints."""

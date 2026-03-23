@@ -1,0 +1,22 @@
+{
+  "Code": 200,
+  "Data": {
+    "SdkTokens": [
+      {
+        "ExpiresAt": "2026-04-22T03:23:21Z",
+        "GmtCreated": "2026-03-23T03:23:22Z",
+        "GmtModified": "2026-03-23T03:23:22Z",
+        "Id": 3245671,
+        "Scope": "Scope",
+        "SdkToken": "ms-cde0e8be-4f10-42d0-834f-6d93352b91b3",
+        "SdkTokenName": "default",
+        "Username": "skuwok",
+        "Valid": "1"
+      }
+    ],
+    "TotalCount": 1
+  },
+  "Message": "success",
+  "RequestId": "d6dbc2a7-2068-440b-a45e-0c825fa29b8c",
+  "Success": true
+}

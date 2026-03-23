@@ -12,6 +12,7 @@ The runtime is the stable contract boundary between agent callers, provider impl
    - session persistence
    - guardrails and escalation
    - trace and replay models
+   - JSON-stdio script runner
 2. `web2skill.browser`
    - Playwright lifecycle helpers
    - network capture
@@ -19,12 +20,23 @@ The runtime is the stable contract boundary between agent callers, provider impl
    - guided fallback orchestration
 3. `web2skill.skills`
    - manifest schema
-   - provider capability registry
+   - built-in and user-installed bundle discovery
+   - bundle installer and per-skill environment management
+   - capability and session-hook execution adapters
    - `SKILL.md` rendering helpers
-4. `web2skill.providers.<provider>`
-   - capability handlers
-   - selectors and parsers
-   - provider-specific login and drift probes
+4. `skills/<provider>/`
+   - `SKILL.md` and `skill.yaml`
+   - `scripts/capabilities/` entry scripts
+   - `scripts/session/` login and doctor hooks
+   - `scripts/lib/` provider-specific selectors, parsers, and helpers
+
+## Bundle Discovery
+
+- User-installed bundles are discovered first from `~/.web2skill/skills/`
+- Built-in first-party bundles are discovered second from the packaged `web2skill/bundled_skills`
+  directory inside the wheel
+- Capability execution always flows through bundle metadata and JSON-stdio scripts rather than
+  hard-coded provider imports in the CLI/runtime path
 
 ## Execution Rules
 
@@ -32,8 +44,8 @@ The runtime is the stable contract boundary between agent callers, provider impl
 - Treat DOM parsing as fallback, not the primary contract.
 - Reserve guided UI fallback for login and genuinely interactive flows.
 - Return a `SkillResult` for every invocation, even when escalation is required.
+- Use explicit confirmation fields for high-risk capabilities before automation proceeds.
 
 ## Replay Model
 
 Every invocation should write enough structured trace data to replay the decision path, data source, and normalized output without requiring a live re-run.
-

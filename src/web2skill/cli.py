@@ -11,11 +11,10 @@ import typer
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from web2skill.core.runtime import SkillRuntime
-from web2skill.core.sessions import FileSessionStore, SessionRecord
+from web2skill.core.sessions import FileSessionStore
 from web2skill.core.traces import FileTraceStore
-from web2skill.providers.modelscope.login import bootstrap_interactive_login, doctor_storage_state
-from web2skill.providers.modelscope.provider import ModelScopeRegistry
-from web2skill.skills import SkillRegistry
+from web2skill.skills import BundleInstaller, SkillRegistry
+from web2skill.skills.execution import BundleCapabilityRegistry, BundleSessionService
 
 # pyright: reportUnusedFunction=false
 
@@ -30,7 +29,7 @@ class InvocationRuntime(Protocol):
 
 
 class SessionService(Protocol):
-    def login(self, provider: str) -> Any: ...
+    def login(self, provider: str, *, mode: str = "interactive", browser: str = "auto") -> Any: ...
 
     def doctor(self, provider: str) -> Any: ...
 
@@ -46,46 +45,7 @@ class CliServices:
     sessions: SessionService | None = None
     replay: ReplayService | None = None
     session_store: FileSessionStore | None = None
-
-
-class DefaultSessionService:
-    def __init__(self, session_store: FileSessionStore) -> None:
-        self._session_store = session_store
-
-    def login(self, provider: str) -> Any:
-        if provider != "modelscope":
-            msg = f"unsupported provider '{provider}'"
-            raise LookupError(msg)
-        result = bootstrap_interactive_login()
-        payload = result.model_dump(mode="json")
-        if result.authenticated:
-            session_id = f"{provider}-{uuid.uuid4().hex[:12]}"
-            session = SessionRecord.create(
-                session_id=session_id,
-                provider_name=provider,
-                storage_state_path=Path(result.storage_state_path),
-                base_url="https://www.modelscope.cn",
-            )
-            self._session_store.put(session)
-            payload["session_id"] = session_id
-        return payload
-
-    def doctor(self, provider: str) -> Any:
-        if provider != "modelscope":
-            msg = f"unsupported provider '{provider}'"
-            raise LookupError(msg)
-        sessions = self._session_store.list(provider_name=provider)
-        latest = sessions[0] if sessions else None
-        ok, message = doctor_storage_state(latest.storage_state_path if latest else None)
-        return {
-            "provider": provider,
-            "ok": ok,
-            "message": message,
-            "session_id": latest.session_id if latest else None,
-            "storage_state_path": (
-                str(latest.storage_state_path) if latest and latest.storage_state_path else None
-            ),
-        }
+    installer: BundleInstaller | None = None
 
 
 class DefaultReplayService:
@@ -108,10 +68,14 @@ def build_app(
 ) -> typer.Typer:
     resolved_registry = registry or SkillRegistry.discover()
     session_store = FileSessionStore()
+    trace_store = FileTraceStore()
     default_runtime = SkillRuntime(
-        registry=ModelScopeRegistry(session_store=session_store),
+        registry=BundleCapabilityRegistry(
+            skill_registry=resolved_registry,
+            session_store=session_store,
+        ),
         session_store=session_store,
-        trace_store=FileTraceStore(),
+        trace_store=trace_store,
     )
     resolved_runtime: InvocationRuntime = runtime or default_runtime
     resolved_replay = replay
@@ -120,9 +84,14 @@ def build_app(
     services = CliServices(
         registry=resolved_registry,
         runtime=resolved_runtime,
-        sessions=sessions or DefaultSessionService(session_store),
+        sessions=sessions
+        or BundleSessionService(
+            skill_registry=resolved_registry,
+            session_store=session_store,
+        ),
         replay=resolved_replay,
         session_store=session_store,
+        installer=BundleInstaller(),
     )
 
     application = typer.Typer(
@@ -187,6 +156,48 @@ def build_app(
         except LookupError as exc:
             raise typer.Exit(code=_usage_error(str(exc))) from exc
 
+    @skills_app.command("install")
+    def skills_install(
+        source: str = typer.Argument(help="Local path or git URL for a skill bundle."),
+        as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
+    ) -> None:
+        if services.installer is None:
+            raise typer.Exit(code=_missing_integration("skills.install"))
+        try:
+            result = services.installer.install(source)
+        except (LookupError, RuntimeError) as exc:
+            raise typer.Exit(code=_usage_error(str(exc))) from exc
+        services.registry = SkillRegistry.discover()
+        _emit_command_result(result, as_json=as_json)
+
+    @skills_app.command("uninstall")
+    def skills_uninstall(
+        bundle_id: str = typer.Argument(help="Bundle id to remove."),
+        as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
+    ) -> None:
+        if services.installer is None:
+            raise typer.Exit(code=_missing_integration("skills.uninstall"))
+        try:
+            result = services.installer.uninstall(bundle_id)
+        except LookupError as exc:
+            raise typer.Exit(code=_usage_error(str(exc))) from exc
+        services.registry = SkillRegistry.discover()
+        _emit_command_result(result, as_json=as_json)
+
+    @skills_app.command("update")
+    def skills_update(
+        bundle_id: str = typer.Argument(help="Bundle id to update from its install source."),
+        as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
+    ) -> None:
+        if services.installer is None:
+            raise typer.Exit(code=_missing_integration("skills.update"))
+        try:
+            result = services.installer.update(bundle_id)
+        except LookupError as exc:
+            raise typer.Exit(code=_usage_error(str(exc))) from exc
+        services.registry = SkillRegistry.discover()
+        _emit_command_result(result, as_json=as_json)
+
     @application.command("invoke")
     def invoke(
         capability: str = typer.Argument(help="Fully-qualified capability name."),
@@ -218,12 +229,26 @@ def build_app(
     @sessions_app.command("login")
     def sessions_login(
         provider: str = typer.Argument(help="Provider id."),
+        mode: str = typer.Option(
+            "interactive",
+            "--mode",
+            help="Login mode: interactive or import-browser.",
+        ),
+        browser: str = typer.Option(
+            "auto",
+            "--browser",
+            help="Browser source when --mode import-browser is used.",
+        ),
         as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
     ) -> None:
         _validate_provider(services.registry, provider)
         if services.sessions is None:
             raise typer.Exit(code=_missing_integration("sessions.login"))
-        _emit_command_result(services.sessions.login(provider), as_json=as_json)
+        try:
+            result = services.sessions.login(provider, mode=mode, browser=browser)
+        except LookupError as exc:
+            raise typer.Exit(code=_usage_error(str(exc))) from exc
+        _emit_command_result(result, as_json=as_json)
 
     @sessions_app.command("doctor")
     def sessions_doctor(

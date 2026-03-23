@@ -72,6 +72,7 @@ class ExecutionContext(RuntimeBaseModel):
     allowed_strategies: tuple[Strategy, ...] = (Strategy.NETWORK, Strategy.DOM, Strategy.GUIDED_UI)
     preferred_strategy: Strategy | None = None
     requires_human_confirmation: bool = False
+    human_confirmation_granted: bool = False
     metadata: dict[str, MetadataValue] = Field(default_factory=dict)
     started_at: datetime = Field(default_factory=utc_now)
 
@@ -145,6 +146,7 @@ class CapabilityDescriptor(RuntimeBaseModel):
     risk_level: RiskLevel = RiskLevel.LOW
     supported_strategies: tuple[Strategy, ...] = (Strategy.NETWORK, Strategy.DOM)
     requires_session: bool = False
+    confirmation_field: str | None = None
     input_model: type[BaseModel] | None = None
 
     def validate_payload(self, payload: StructuredPayload) -> StructuredPayload:

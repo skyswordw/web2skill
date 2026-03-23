@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from pydantic import ValidationError
@@ -27,14 +27,20 @@ from web2skill.core.sessions import SessionStore
 from .contracts import (
     AccountProfile,
     CapabilityName,
+    CreateTokenInput,
+    CreateTokenOutput,
     GetAccountProfileInput,
+    GetTokenInput,
     ListModelFilesOutput,
+    ListTokensInput,
+    ListTokensOutput,
     ModelOverview,
     ModelSlugInput,
     QuickstartSnippet,
     SearchModelsInput,
     SearchModelsOutput,
     StrategyUsed,
+    TokenDetail,
     TraceEvent,
 )
 from .contracts import (
@@ -46,8 +52,12 @@ from .parsers import (
     extract_embedded_detail_data,
     extract_quickstart_from_markdown,
     normalize_account_profile,
+    normalize_create_token_output,
+    normalize_created_token_response,
     normalize_model_overview,
     normalize_repo_files,
+    normalize_token_detail,
+    normalize_token_list,
 )
 from .selectors import (
     BASE_URL,
@@ -56,6 +66,8 @@ from .selectors import (
     MODEL_REPO_FILES_API,
     MODEL_REVISIONS_API,
     SEARCH_MODELS_API,
+    TOKEN_CREATE_API,
+    TOKEN_LIST_API,
 )
 
 
@@ -100,6 +112,9 @@ class ModelScopeProvider:
             CapabilityName.LIST_MODEL_FILES: self.list_model_files,
             CapabilityName.GET_QUICKSTART: self.get_quickstart,
             CapabilityName.GET_ACCOUNT_PROFILE: self.get_account_profile,
+            CapabilityName.LIST_TOKENS: self.list_tokens,
+            CapabilityName.GET_TOKEN: self.get_token,
+            CapabilityName.CREATE_TOKEN: self.create_token,
         }
         return handlers[capability](payload)
 
@@ -315,6 +330,252 @@ class ModelScopeProvider:
             trace=trace,
         )
 
+    def list_tokens(self, payload: dict[str, Any]) -> ProviderSkillResult[ListTokensOutput]:
+        trace_id = uuid.uuid4().hex
+        try:
+            ListTokensInput.model_validate(payload)
+        except ValidationError as exc:
+            return self._validation_error_result(trace_id, CapabilityName.LIST_TOKENS, exc)
+
+        trace = [
+            TraceEvent(
+                stage="request_validation",
+                detail="Validated list_tokens input with Pydantic.",
+                strategy=StrategyUsed.NETWORK,
+            )
+        ]
+        response = self._client.get(TOKEN_LIST_API)
+        if response.status_code == 401:
+            return self._unauthenticated_result(
+                trace_id=trace_id,
+                capability=CapabilityName.LIST_TOKENS,
+                trace=trace,
+            )
+        response.raise_for_status()
+        normalized = normalize_token_list(response.json())
+        trace.append(
+            TraceEvent(
+                stage="network_fetch",
+                detail=f"Fetched token metadata from {TOKEN_LIST_API}.",
+                strategy=StrategyUsed.NETWORK,
+            )
+        )
+        return ProviderSkillResult(
+            trace_id=trace_id,
+            capability=CapabilityName.LIST_TOKENS,
+            strategy_used=StrategyUsed.NETWORK,
+            requires_human=False,
+            data=normalized,
+            trace=trace,
+        )
+
+    def get_token(self, payload: dict[str, Any]) -> ProviderSkillResult[TokenDetail]:
+        trace_id = uuid.uuid4().hex
+        try:
+            request = GetTokenInput.model_validate(payload)
+        except ValidationError as exc:
+            return self._validation_error_result(trace_id, CapabilityName.GET_TOKEN, exc)
+
+        trace = [
+            TraceEvent(
+                stage="request_validation",
+                detail="Validated get_token input with Pydantic.",
+                strategy=StrategyUsed.NETWORK,
+            )
+        ]
+        if not request.confirm_reveal:
+            trace.append(
+                TraceEvent(
+                    stage="confirmation_required",
+                    detail="Explicit confirmation is required before revealing a raw token.",
+                    strategy=StrategyUsed.NETWORK,
+                )
+            )
+            return ProviderSkillResult(
+                trace_id=trace_id,
+                capability=CapabilityName.GET_TOKEN,
+                strategy_used=StrategyUsed.NETWORK,
+                requires_human=True,
+                errors=["Explicit confirmation is required before revealing a raw token."],
+                trace=trace,
+            )
+
+        response = self._client.get(TOKEN_LIST_API)
+        if response.status_code == 401:
+            return self._unauthenticated_result(
+                trace_id=trace_id,
+                capability=CapabilityName.GET_TOKEN,
+                trace=trace,
+            )
+        response.raise_for_status()
+        try:
+            detail = normalize_token_detail(response.json(), token_id=request.token_id)
+        except ValueError as exc:
+            return ProviderSkillResult(
+                trace_id=trace_id,
+                capability=CapabilityName.GET_TOKEN,
+                strategy_used=StrategyUsed.NETWORK,
+                requires_human=False,
+                errors=[str(exc)],
+                trace=trace,
+            )
+        trace.append(
+            TraceEvent(
+                stage="network_fetch",
+                detail=f"Fetched token record {request.token_id} from {TOKEN_LIST_API}.",
+                strategy=StrategyUsed.NETWORK,
+            )
+        )
+        return ProviderSkillResult(
+            trace_id=trace_id,
+            capability=CapabilityName.GET_TOKEN,
+            strategy_used=StrategyUsed.NETWORK,
+            requires_human=False,
+            data=detail,
+            trace=trace,
+        )
+
+    def create_token(self, payload: dict[str, Any]) -> ProviderSkillResult[CreateTokenOutput]:
+        trace_id = uuid.uuid4().hex
+        try:
+            request = CreateTokenInput.model_validate(payload)
+        except ValidationError as exc:
+            return self._validation_error_result(trace_id, CapabilityName.CREATE_TOKEN, exc)
+
+        trace = [
+            TraceEvent(
+                stage="request_validation",
+                detail="Validated create_token input with Pydantic.",
+                strategy=StrategyUsed.NETWORK,
+            )
+        ]
+        if not request.confirm_create:
+            trace.append(
+                TraceEvent(
+                    stage="confirmation_required",
+                    detail="Explicit confirmation is required before creating a token.",
+                    strategy=StrategyUsed.NETWORK,
+                )
+            )
+            return ProviderSkillResult(
+                trace_id=trace_id,
+                capability=CapabilityName.CREATE_TOKEN,
+                strategy_used=StrategyUsed.NETWORK,
+                requires_human=True,
+                errors=["Explicit confirmation is required before creating a token."],
+                trace=trace,
+            )
+
+        before_response = self._client.get(TOKEN_LIST_API)
+        if before_response.status_code == 401:
+            return self._unauthenticated_result(
+                trace_id=trace_id,
+                capability=CapabilityName.CREATE_TOKEN,
+                trace=trace,
+            )
+        before_response.raise_for_status()
+        before_payload = before_response.json()
+        trace.append(
+            TraceEvent(
+                stage="network_fetch",
+                detail="Fetched current token metadata before creation to compute the create diff.",
+                strategy=StrategyUsed.NETWORK,
+            )
+        )
+
+        request_payload: dict[str, object] = {"TokenName": request.name}
+        if request.validity.value == "permanent":
+            request_payload["ExpireMonths"] = 1200
+
+        create_response = self._client.post(TOKEN_CREATE_API, json=request_payload)
+        if create_response.status_code == 401:
+            return self._unauthenticated_result(
+                trace_id=trace_id,
+                capability=CapabilityName.CREATE_TOKEN,
+                trace=trace,
+            )
+
+        create_payload = self._response_json_dict(create_response)
+        if create_response.is_error or not self._response_is_success(
+            create_response, create_payload
+        ):
+            trace.append(
+                TraceEvent(
+                    stage="network_error",
+                    detail=f"ModelScope token creation request failed at {TOKEN_CREATE_API}.",
+                    strategy=StrategyUsed.NETWORK,
+                )
+            )
+            return ProviderSkillResult(
+                trace_id=trace_id,
+                capability=CapabilityName.CREATE_TOKEN,
+                strategy_used=StrategyUsed.NETWORK,
+                requires_human=False,
+                errors=self._response_error_messages(create_response, create_payload),
+                trace=trace,
+            )
+        trace.append(
+            TraceEvent(
+                stage="network_mutation",
+                detail="Submitted the authenticated create-token request to ModelScope.",
+                strategy=StrategyUsed.NETWORK,
+            )
+        )
+
+        after_response = self._client.get(TOKEN_LIST_API)
+        if after_response.status_code == 401:
+            return self._unauthenticated_result(
+                trace_id=trace_id,
+                capability=CapabilityName.CREATE_TOKEN,
+                trace=trace,
+            )
+        after_response.raise_for_status()
+        after_payload = after_response.json()
+        trace.append(
+            TraceEvent(
+                stage="network_fetch",
+                detail=(
+                    "Fetched refreshed token metadata after creation to resolve the created token."
+                ),
+                strategy=StrategyUsed.NETWORK,
+            )
+        )
+
+        try:
+            created_token = self._resolve_created_token(
+                before_payload=before_payload,
+                after_payload=after_payload,
+                create_payload=create_payload,
+                requested_name=request.name,
+            )
+        except ValueError as exc:
+            return ProviderSkillResult(
+                trace_id=trace_id,
+                capability=CapabilityName.CREATE_TOKEN,
+                strategy_used=StrategyUsed.NETWORK,
+                requires_human=False,
+                errors=[str(exc)],
+                trace=trace,
+            )
+
+        trace.append(
+            TraceEvent(
+                stage="create_token",
+                detail=(
+                    "Resolved the newly created token from the refreshed authenticated token list."
+                ),
+                strategy=StrategyUsed.NETWORK,
+            )
+        )
+        return ProviderSkillResult(
+            trace_id=trace_id,
+            capability=CapabilityName.CREATE_TOKEN,
+            strategy_used=StrategyUsed.NETWORK,
+            requires_human=False,
+            data=created_token,
+            trace=trace,
+        )
+
     def _model_detail_result(
         self,
         *,
@@ -408,6 +669,29 @@ class ModelScopeProvider:
             ],
         )
 
+    def _unauthenticated_result(
+        self,
+        *,
+        trace_id: str,
+        capability: CapabilityName,
+        trace: list[TraceEvent],
+    ) -> ProviderSkillResult[Any]:
+        trace.append(
+            TraceEvent(
+                stage="auth_check",
+                detail="ModelScope session is not authenticated for this token-management request.",
+                strategy=StrategyUsed.NETWORK,
+            )
+        )
+        return ProviderSkillResult(
+            trace_id=trace_id,
+            capability=capability,
+            strategy_used=StrategyUsed.NETWORK,
+            requires_human=True,
+            errors=["ModelScope session is not authenticated."],
+            trace=trace,
+        )
+
     def _map_sort(self, sort: str) -> str:
         normalized = sort.lower()
         if normalized in {"relevance", "default"}:
@@ -431,6 +715,92 @@ class ModelScopeProvider:
             if isinstance(name, str) and isinstance(value, str):
                 cookie_map[name] = value
         return cookie_map
+
+    def _resolve_created_token(
+        self,
+        *,
+        before_payload: dict[str, Any],
+        after_payload: dict[str, Any],
+        create_payload: dict[str, Any] | None,
+        requested_name: str,
+    ) -> CreateTokenOutput:
+        before_ids = self._token_ids(before_payload)
+        after_ids = self._token_ids(after_payload)
+        new_ids = after_ids - before_ids
+
+        if len(new_ids) == 1:
+            return normalize_create_token_output(after_payload, token_id=next(iter(new_ids)))
+
+        matching_ids = [
+            token_id
+            for token_id in new_ids
+            if self._token_name(after_payload, token_id=token_id) == requested_name
+        ]
+        if matching_ids:
+            return normalize_create_token_output(after_payload, token_id=max(matching_ids))
+
+        direct_output = (
+            normalize_created_token_response(create_payload) if create_payload is not None else None
+        )
+        if direct_output is not None:
+            return direct_output
+
+        matching_existing = [
+            token_id
+            for token_id in after_ids
+            if self._token_name(after_payload, token_id=token_id) == requested_name
+        ]
+        if matching_existing:
+            return normalize_create_token_output(after_payload, token_id=max(matching_existing))
+
+        msg = (
+            "ModelScope reported token creation success, but the created token could not be "
+            "resolved from the refreshed token list."
+        )
+        raise ValueError(msg)
+
+    def _token_ids(self, payload: dict[str, Any]) -> set[int]:
+        normalized = normalize_token_list(payload)
+        return {item.token_id for item in normalized.items}
+
+    def _token_name(self, payload: dict[str, Any], *, token_id: int) -> str | None:
+        try:
+            detail = normalize_token_detail(payload, token_id=token_id)
+        except ValueError:
+            return None
+        return detail.name
+
+    def _response_json_dict(self, response: httpx.Response) -> dict[str, Any] | None:
+        try:
+            payload = response.json()
+        except ValueError:
+            return None
+        return cast(dict[str, Any], payload) if isinstance(payload, dict) else None
+
+    def _response_is_success(
+        self,
+        response: httpx.Response,
+        payload: dict[str, Any] | None,
+    ) -> bool:
+        if not response.is_success:
+            return False
+        if payload is None:
+            return True
+        if payload.get("Success") is False:
+            return False
+        code = payload.get("Code")
+        return not (isinstance(code, int) and code >= 400)
+
+    def _response_error_messages(
+        self,
+        response: httpx.Response,
+        payload: dict[str, Any] | None,
+    ) -> list[str]:
+        if payload is not None:
+            message = payload.get("Message")
+            if isinstance(message, str) and message:
+                return [message]
+        return [f"ModelScope API request failed with status {response.status_code}."]
 
 
 class _ModelScopeHandler:
@@ -507,6 +877,27 @@ class ModelScopeRegistry:
                 risk_level=RiskLevel.LOW,
                 supported_strategies=(CoreStrategy.NETWORK,),
                 input_model=GetAccountProfileInput,
+            ),
+            CapabilityName.LIST_TOKENS: CoreCapabilityDescriptor(
+                capability_name=capability.value,
+                provider_name="modelscope",
+                risk_level=RiskLevel.MEDIUM,
+                supported_strategies=(CoreStrategy.NETWORK,),
+                input_model=ListTokensInput,
+            ),
+            CapabilityName.GET_TOKEN: CoreCapabilityDescriptor(
+                capability_name=capability.value,
+                provider_name="modelscope",
+                risk_level=RiskLevel.MEDIUM,
+                supported_strategies=(CoreStrategy.NETWORK,),
+                input_model=GetTokenInput,
+            ),
+            CapabilityName.CREATE_TOKEN: CoreCapabilityDescriptor(
+                capability_name=capability.value,
+                provider_name="modelscope",
+                risk_level=RiskLevel.MEDIUM,
+                supported_strategies=(CoreStrategy.NETWORK, CoreStrategy.GUIDED_UI),
+                input_model=CreateTokenInput,
             ),
         }
         return descriptors[capability]

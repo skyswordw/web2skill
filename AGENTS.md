@@ -6,6 +6,9 @@ This repository is built by cooperating agents with strict write ownership. Keep
 
 - Project name is fixed as `web2skill`.
 - Python is the only primary implementation language.
+- Publish one Python package: `web2skill`.
+- First-party skills ship as bundled skill directories inside that package.
+- User-created skills are installed from a local path or git URL, not from PyPI.
 - Runtime inputs and outputs must be validated with Pydantic.
 - Prefer real network responses, then DOM parsing, then guided UI fallback.
 - Every invocation must emit a structured `SkillResult` with `trace_id`, `strategy_used`, and `requires_human`.
@@ -45,14 +48,14 @@ This repository is built by cooperating agents with strict write ownership. Keep
 - Model: `gpt-5.4`
 - Reasoning effort: `medium`
 - Write scope: `src/web2skill/skills/`, `src/web2skill/cli.py`, `skills/`
-- Responsibilities: manifest schema, registry, `SKILL.md` rendering, Typer CLI shell
+- Responsibilities: manifest schema, bundle registry, installer, `SKILL.md` rendering, Typer CLI shell
 
 ### ModelScope Provider Agent
 
 - Model: `gpt-5.4`
 - Reasoning effort: `medium`
-- Write scope: `src/web2skill/providers/modelscope/`
-- Responsibilities: capability handlers, parsing, session reuse, login bootstrap, drift probes
+- Write scope: `skills/modelscope/`
+- Responsibilities: bundle-local capability handlers, parsing, session reuse, login bootstrap, and drift probes
 
 ### Eval Agent
 
@@ -83,4 +86,3 @@ uv run pyright
 uv run pytest
 uv run playwright install chromium
 ```
-

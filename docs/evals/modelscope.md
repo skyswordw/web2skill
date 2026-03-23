@@ -13,10 +13,10 @@ without `unit + integration + e2e + drift` coverage.
 
 | Layer | Files | Goal |
 | --- | --- | --- |
-| Unit | `tests/unit/core/`, `tests/unit/skills/`, `tests/unit/providers/modelscope/` | Validate Pydantic contracts, runtime shape, manifest coverage, and parser normalization |
-| Integration | `tests/integration/` | Validate runtime/CLI/provider boundaries, replay contracts, and capability exposure |
-| E2E | `tests/e2e/test_modelscope_live.py` | Exercise the five approved capabilities against live ModelScope flows |
-| Drift | `tests/drift/test_modelscope_drift.py` | Freeze expected response keys and live anchor inputs so provider changes surface early |
+| Unit | `tests/unit/core/`, `tests/unit/skills/`, `tests/unit/providers/modelscope/` | Validate Pydantic contracts, runtime shape, bundle manifests, installer behavior, and parser normalization |
+| Integration | `tests/integration/` | Validate bundle discovery, CLI install/update flows, runtime/script execution, session hooks, replay contracts, and capability exposure |
+| E2E | `tests/e2e/test_modelscope_live.py` | Exercise the approved ModelScope read capabilities live and gate token writes behind an explicit opt-in |
+| Drift | `tests/drift/test_modelscope_drift.py` | Freeze expected response keys and token-page create-dialog anchors so bundle/parser changes surface early |
 
 ## Environment Gating
 
@@ -32,6 +32,8 @@ Optional live inputs:
 - `WEB2SKILL_MODELSCOPE_SESSION_ID`
 - `WEB2SKILL_MODELSCOPE_STORAGE_STATE`
 - `WEB2SKILL_MODELSCOPE_KNOWN_SLUG`
+- `WEB2SKILL_RUN_TOKEN_WRITES=1`
+- `WEB2SKILL_MODELSCOPE_TEST_TOKEN_NAME`
 
 If `WEB2SKILL_RUN_LIVE` is not set, tests marked `live` or `e2e` are skipped during collection.
 
@@ -43,10 +45,18 @@ Contract and scaffold coverage:
 uv run pytest tests/unit tests/integration tests/drift
 ```
 
-Live smoke coverage after preparing a session:
+Bundle management coverage:
 
 ```bash
-WEB2SKILL_RUN_LIVE=1 uv run pytest tests/e2e/test_modelscope_live.py -v
+uv run pytest tests/integration/test_skill_installation.py -v
+```
+
+Live smoke coverage after preparing a reusable storage-state session:
+
+```bash
+WEB2SKILL_RUN_LIVE=1 \
+WEB2SKILL_MODELSCOPE_STORAGE_STATE=.web2skill/modelscope-storage-state.json \
+uv run pytest tests/e2e/test_modelscope_live.py -v
 ```
 
 Targeted parser contract coverage:
@@ -57,20 +67,29 @@ uv run pytest tests/unit/providers/modelscope/test_parsers.py -v
 
 ## Live Execution Notes
 
-The live suite is written against the approved v1 surface:
+The live suite is written against the approved v1 surface and runs through the bundled-script
+execution path:
 
 1. `modelscope.search_models`
 2. `modelscope.get_model_overview`
 3. `modelscope.list_model_files`
 4. `modelscope.get_quickstart`
 5. `modelscope.get_account_profile`
+6. `modelscope.list_tokens`
+7. `modelscope.get_token`
+
+`modelscope.create_token` is covered separately and only runs when:
+
+- `WEB2SKILL_RUN_LIVE=1`
+- `WEB2SKILL_MODELSCOPE_STORAGE_STATE` points at an authenticated storage-state file
+- `WEB2SKILL_RUN_TOKEN_WRITES=1`
 
 Expected operator flow:
 
 1. Bootstrap dependencies with `uv sync --dev`
 2. Install Chromium with `uv run playwright install chromium`
-3. Create or refresh a ModelScope session via the future `sessions login modelscope` flow
-4. Export the session identifier or storage-state path
+3. Create or refresh a ModelScope session via `web2skill sessions login modelscope --mode import-browser`
+4. Export the storage-state path and optional session identifier
 5. Run the live suite with `WEB2SKILL_RUN_LIVE=1`
 
 Every live invocation should return a `SkillResult` envelope with:
@@ -84,17 +103,23 @@ Every live invocation should return a `SkillResult` envelope with:
 Drift coverage serves two purposes:
 
 1. Keep fixture-based network-shape assertions stable for normalizer tests
-2. Reserve a live drift lane for DOM anchors and endpoint payload changes once the provider
+2. Reserve a live drift lane for DOM anchors and endpoint payload changes once the bundled skill
    implementation lands
 
 The initial scaffolding stores representative ModelScope payloads under `tests/fixtures/modelscope/`.
 As the provider stabilizes, those fixtures should be refreshed from real captures and paired with
 assertions on selector anchors, replay traces, and normalized output snapshots.
 
+Current token drift checks cover:
+
+- `GET /api/v1/users/tokens/list` response-shape keys
+- `/my/access/token` create-dialog anchors: `Create Your Token`, `#TokenName`, `Token validity`, and `Create Token`
+
 ## Current Limits
 
-- The suite is contract-first and will skip when runtime, CLI, skills, or provider modules are not
-  yet present in the worktree.
-- The live suite assumes `SkillRuntime(registry=provider)` remains a supported construction path.
+- The suite is contract-first and will skip live coverage unless reusable ModelScope session inputs
+  are configured.
+- The live suite assumes `SkillRuntime(registry=BundleCapabilityRegistry(...))` is the default
+  execution path for built-in bundles.
 - Drift coverage currently freezes response-shape scaffolding; live DOM-anchor assertions should be
   expanded when the provider exposes selector constants and capture hooks.

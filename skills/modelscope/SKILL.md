@@ -1,6 +1,6 @@
 # ModelScope Skill Pack
 
-ModelScope skills expose normalized read-only capability contracts for model discovery, overview inspection, file listing, quickstart extraction, and authenticated profile lookup.
+ModelScope skills expose normalized capability contracts for model discovery, overview inspection, file listing, quickstart extraction, authenticated profile lookup, and access-token management.
 
 ## Provider
 
@@ -147,3 +147,89 @@ Returns normalized profile details from an already-authenticated ModelScope sess
 ### Human Handoff
 
 - Escalate if the account requires CAPTCHA, MFA, or other interactive approval.
+
+## `modelscope.list_tokens`
+
+Returns non-secret token metadata such as id, name, creation time, and expiry.
+
+- Risk: `medium`
+- Strategy order: `network, dom`
+- Human confirmation required: `false`
+
+### Prerequisites
+
+- An existing authenticated browser session is required.
+
+### Workflow
+
+1. Read token metadata from the authenticated token-management API.
+1. Return only non-secret metadata in the list response.
+
+### Recovery
+
+- If the token API drifts, inspect the authenticated account token page network calls.
+
+## `modelscope.get_token`
+
+Returns a raw token string for one selected token only after explicit confirmation.
+
+- Risk: `high`
+- Strategy order: `network, dom`
+- Human confirmation required: `true`
+
+### Prerequisites
+
+- An existing authenticated browser session is required.
+
+### Workflow
+
+1. Read the authenticated token list.
+1. Select the requested token by id and reveal the raw token only when explicitly confirmed.
+
+### Human Handoff
+
+- Escalate if the session is expired or additional account approval is required.
+
+### Examples
+
+#### Reveal the default token
+
+Return the raw token value for one selected token.
+
+Input:
+```json
+{
+  "confirm_reveal": true,
+  "token_id": 3245671
+}
+```
+
+Output:
+```json
+{
+  "name": "default",
+  "token": "ms-...",
+  "token_id": 3245671
+}
+```
+
+## `modelscope.create_token`
+
+Creates a new token only after explicit confirmation and returns the created raw token.
+
+- Risk: `high`
+- Strategy order: `network, ui`
+- Human confirmation required: `true`
+
+### Prerequisites
+
+- An existing authenticated browser session is required.
+
+### Workflow
+
+1. Prefer a stable authenticated create-token API if one is available.
+1. Use guided UI fallback only for the bounded create-token flow when needed.
+
+### Human Handoff
+
+- Escalate if the session is expired, the token quota is exhausted, or a human must confirm account actions.

@@ -27,6 +27,9 @@ class CapabilityName(str, Enum):
     LIST_MODEL_FILES = "modelscope.list_model_files"
     GET_QUICKSTART = "modelscope.get_quickstart"
     GET_ACCOUNT_PROFILE = "modelscope.get_account_profile"
+    LIST_TOKENS = "modelscope.list_tokens"
+    GET_TOKEN = "modelscope.get_token"
+    CREATE_TOKEN = "modelscope.create_token"
 
 
 class TraceEvent(BaseModel):
@@ -49,6 +52,26 @@ class ModelSlugInput(BaseModel):
 
 class GetAccountProfileInput(BaseModel):
     pass
+
+
+class ListTokensInput(BaseModel):
+    pass
+
+
+class GetTokenInput(BaseModel):
+    token_id: int = Field(gt=0)
+    confirm_reveal: bool = False
+
+
+class CreateTokenValidity(str, Enum):
+    PERMANENT = "permanent"
+    SHORT_TERM = "short_term"
+
+
+class CreateTokenInput(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    validity: CreateTokenValidity = CreateTokenValidity.PERMANENT
+    confirm_create: bool = False
 
 
 class OrganizationSummary(BaseModel):
@@ -135,6 +158,37 @@ class AccountProfile(BaseModel):
     avatar_url: str | None = None
     organization_names: list[str] = Field(default_factory=list)
     raw_profile: dict[str, object] = Field(default_factory=dict)
+
+
+class TokenSummary(BaseModel):
+    token_id: int
+    name: str
+    expires_at: datetime | None = None
+    created_at: datetime | None = None
+    valid: bool
+
+
+class ListTokensOutput(BaseModel):
+    items: list[TokenSummary]
+    total_count: int
+
+
+class TokenDetail(BaseModel):
+    token_id: int
+    name: str
+    token: str
+    expires_at: datetime | None = None
+    created_at: datetime | None = None
+    valid: bool
+
+
+class CreateTokenOutput(BaseModel):
+    token_id: int
+    name: str
+    token: str
+    expires_at: datetime | None = None
+    created_at: datetime | None = None
+    valid: bool
 
 
 class LoginBootstrapResult(BaseModel):

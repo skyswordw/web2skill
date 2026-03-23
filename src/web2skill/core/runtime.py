@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Protocol, cast
 
 from pydantic import BaseModel
@@ -80,6 +80,7 @@ class SkillRuntime:
         descriptor = self._resolve_descriptor(request.capability_name)
         handler = self._resolve_handler(request.capability_name)
         validated_payload = descriptor.validate_payload(request.payload)
+        human_confirmation_granted = self._confirmation_granted(descriptor, validated_payload)
         if request.trace_id is None:
             context = ExecutionContext(
                 capability_name=descriptor.capability_name,
@@ -89,6 +90,7 @@ class SkillRuntime:
                 risk_level=descriptor.risk_level,
                 allowed_strategies=descriptor.supported_strategies,
                 preferred_strategy=request.preferred_strategy,
+                human_confirmation_granted=human_confirmation_granted,
             )
         else:
             context = ExecutionContext(
@@ -100,13 +102,31 @@ class SkillRuntime:
                 risk_level=descriptor.risk_level,
                 allowed_strategies=descriptor.supported_strategies,
                 preferred_strategy=request.preferred_strategy,
+                human_confirmation_granted=human_confirmation_granted,
             )
 
         decision = self.guardrails.select_strategy(context)
+        if descriptor.confirmation_field is not None:
+            error = self.guardrails.require_confirmation(context, descriptor.confirmation_field)
+            if error is not None:
+                return self._finalize_failure(
+                    context,
+                    decision.strategy,
+                    error,
+                    decision.warnings,
+                    requires_human=True,
+                    phase="guardrails.confirmation_required",
+                )
         if descriptor.requires_session and self.session_store.get(context.session_id or "") is None:
             error = self.guardrails.require_session(context)
             assert error is not None
-            return self._finalize_failure(context, decision.strategy, error, decision.warnings)
+            return self._finalize_failure(
+                context,
+                decision.strategy,
+                error,
+                decision.warnings,
+                phase="guardrails.failed",
+            )
 
         if decision.requires_human:
             result = SkillResult.human_required(
@@ -183,15 +203,30 @@ class SkillRuntime:
         strategy: Strategy,
         error: SkillError,
         warnings: tuple[GuardrailWarning, ...],
+        *,
+        requires_human: bool = False,
+        phase: str,
     ) -> SkillResult:
-        result = SkillResult.failure(
-            context=context,
-            strategy=strategy,
-            error=error,
+        result = SkillResult(
+            trace_id=context.trace_id,
+            capability_name=context.capability_name,
+            strategy_used=strategy,
+            requires_human=requires_human,
+            session_id=context.session_id,
+            errors=(error,),
             warnings=warnings,
+            metadata=context.metadata,
         )
-        self._record_trace(context, result, strategy, phase="guardrails.failed")
+        self._record_trace(context, result, strategy, phase=phase)
         return result
+
+    @staticmethod
+    def _confirmation_granted(
+        descriptor: CapabilityDescriptor, payload: Mapping[str, object]
+    ) -> bool:
+        if descriptor.confirmation_field is None:
+            return False
+        return payload.get(descriptor.confirmation_field) is True
 
     def _record_trace(
         self,

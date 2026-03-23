@@ -7,13 +7,17 @@ from typing import Any, cast
 
 from .contracts import (
     AccountProfile,
+    CreateTokenOutput,
     ListModelFilesOutput,
+    ListTokensOutput,
     ModelFileEntry,
     ModelOverview,
     ModelSearchItem,
     OrganizationSummary,
     QuickstartSnippet,
     SearchModelsOutput,
+    TokenDetail,
+    TokenSummary,
 )
 from .selectors import BASE_URL, EMBEDDED_DETAIL_MARKER
 
@@ -22,6 +26,15 @@ def parse_unix_timestamp(value: Any) -> datetime | None:
     if not isinstance(value, int) or value <= 0:
         return None
     return datetime.fromtimestamp(value, tz=UTC)
+
+
+def parse_iso_datetime(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def model_slug_to_url(model_slug: str) -> str:
@@ -102,7 +115,9 @@ def normalize_search_results(
                 downloads=_as_int(model_payload.get("Downloads")),
                 stars=_as_int(model_payload.get("Stars")),
                 updated_at=parse_unix_timestamp(model_payload.get("LastUpdatedTime")),
-                organization=_organization_from_payload(_as_dict(model_payload.get("Organization"))),
+                organization=_organization_from_payload(
+                    _as_dict(model_payload.get("Organization"))
+                ),
                 model_url=model_slug_to_url(model_slug),
             )
         )
@@ -228,6 +243,74 @@ def normalize_account_profile(payload: dict[str, Any]) -> AccountProfile:
     )
 
 
+def normalize_token_list(payload: dict[str, Any]) -> ListTokensOutput:
+    data = _data_block(payload)
+    items: list[TokenSummary] = []
+    for raw_token in _list_from(data.get("SdkTokens")):
+        token_payload = _as_dict(raw_token)
+        if token_payload is None:
+            continue
+        token_id = _as_int(token_payload.get("Id"))
+        name = _as_str(token_payload.get("SdkTokenName"))
+        if token_id is None or name is None:
+            continue
+        items.append(
+            TokenSummary(
+                token_id=token_id,
+                name=name,
+                expires_at=parse_iso_datetime(token_payload.get("ExpiresAt")),
+                created_at=parse_iso_datetime(token_payload.get("GmtCreated")),
+                valid=_as_boolish(token_payload.get("Valid")),
+            )
+        )
+    return ListTokensOutput(items=items, total_count=_as_int(data.get("TotalCount")) or len(items))
+
+
+def normalize_token_detail(payload: dict[str, Any], *, token_id: int) -> TokenDetail:
+    data = _data_block(payload)
+    for raw_token in _list_from(data.get("SdkTokens")):
+        token_payload = _as_dict(raw_token)
+        if token_payload is None:
+            continue
+        if _as_int(token_payload.get("Id")) != token_id:
+            continue
+        name = _as_str(token_payload.get("SdkTokenName"))
+        token = _as_str(token_payload.get("SdkToken"))
+        if name is None or token is None:
+            break
+        return TokenDetail(
+            token_id=token_id,
+            name=name,
+            token=token,
+            expires_at=parse_iso_datetime(token_payload.get("ExpiresAt")),
+            created_at=parse_iso_datetime(token_payload.get("GmtCreated")),
+            valid=_as_boolish(token_payload.get("Valid")),
+        )
+    raise ValueError(f"Token id {token_id} was not found in the authenticated token list.")
+
+
+def normalize_create_token_output(payload: dict[str, Any], *, token_id: int) -> CreateTokenOutput:
+    detail = normalize_token_detail(payload, token_id=token_id)
+    return CreateTokenOutput(**detail.model_dump())
+
+
+def normalize_created_token_response(payload: dict[str, Any]) -> CreateTokenOutput | None:
+    data = _data_block(payload)
+    token_id = _as_int(data.get("Id"))
+    name = _as_str(data.get("SdkTokenName"))
+    token = _as_str(data.get("SdkToken"))
+    if token_id is None or name is None or token is None:
+        return None
+    return CreateTokenOutput(
+        token_id=token_id,
+        name=name,
+        token=token,
+        expires_at=parse_iso_datetime(data.get("ExpiresAt")),
+        created_at=parse_iso_datetime(data.get("GmtCreated")),
+        valid=_as_boolish(data.get("Valid")),
+    )
+
+
 def _string_list(value: Any) -> list[str]:
     output: list[str] = []
     for item in _list_from(value):
@@ -250,6 +333,16 @@ def _build_model_slug(payload: dict[str, Any]) -> str | None:
 
 def _as_int(value: Any) -> int | None:
     return value if isinstance(value, int) else None
+
+
+def _as_boolish(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on", "valid"}
+    return False
 
 
 def _stringify(value: Any) -> str | None:

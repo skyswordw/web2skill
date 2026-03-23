@@ -2,13 +2,36 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AnyHttpUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 # pyright: reportUnknownVariableType=false
 
-StrategyName = Literal["network", "dom", "ui"]
+StrategyName = Literal["network", "dom", "guided_ui"]
 AuthMode = Literal["none", "session", "token"]
 RiskLevel = Literal["low", "medium", "high"]
+RuntimeKind = Literal["python_scripts"]
+RuntimeEnv = Literal["core", "bundle"]
+
+
+class RuntimeSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: RuntimeKind = "python_scripts"
+    env: RuntimeEnv = "core"
+
+
+class SessionHooks(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    login_script: str | None = None
+    doctor_script: str | None = None
 
 
 class SkillExample(BaseModel):
@@ -45,6 +68,9 @@ class CapabilityManifest(BaseModel):
     risk: RiskLevel = "low"
     strategies: list[StrategyName] = Field(default_factory=lambda: ["network"])
     requires_confirmation: bool = False
+    entry_script: str | None = None
+    confirmation_field: str | None = None
+    session_required: bool = False
     input_schema: dict[str, Any] = Field(default_factory=dict)
     output_schema: dict[str, Any] = Field(default_factory=dict)
     prerequisites: list[str] = Field(default_factory=list)
@@ -52,6 +78,13 @@ class CapabilityManifest(BaseModel):
     recovery: list[str] = Field(default_factory=list)
     human_handoff: list[str] = Field(default_factory=list)
     examples: list[SkillExample] = Field(default_factory=list)
+
+    @field_validator("strategies", mode="before")
+    @classmethod
+    def normalize_strategies(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+        return ["guided_ui" if item == "ui" else item for item in value]
 
     @model_validator(mode="after")
     def validate_strategies(self) -> CapabilityManifest:
@@ -61,6 +94,8 @@ class CapabilityManifest(BaseModel):
             self.description = self.summary
         if not self.strategies:
             self.strategies = ["network"]
+        if self.confirmation_field and not self.requires_confirmation:
+            self.requires_confirmation = True
         return self
 
 
@@ -68,12 +103,16 @@ class SkillManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: str = Field(default="1.0", min_length=1)
+    bundle_id: str = Field(default="", min_length=0)
+    bundle_version: str = Field(default="1.0.0", min_length=1)
     provider: str = Field(min_length=1)
     provider_display_name: str = Field(default="", min_length=0)
     summary: str = Field(default="", min_length=0)
     description: str = Field(default="", min_length=0)
     base_url: AnyHttpUrl | None = None
     auth: AuthSpec = Field(default_factory=lambda: AuthSpec(mode="none"))
+    runtime: RuntimeSpec = Field(default_factory=RuntimeSpec)
+    session_hooks: SessionHooks = Field(default_factory=SessionHooks)
     prerequisites: list[str] = Field(default_factory=list)
     workflows: list[str] = Field(default_factory=list)
     recovery: list[str] = Field(default_factory=list)
@@ -82,6 +121,8 @@ class SkillManifest(BaseModel):
 
     @model_validator(mode="after")
     def validate_capabilities(self) -> SkillManifest:
+        if not self.bundle_id:
+            self.bundle_id = self.provider
         if not self.provider_display_name:
             self.provider_display_name = self.provider
         if not self.summary:
