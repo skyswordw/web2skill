@@ -1,0 +1,173 @@
+schema_version: "1.0"
+provider: "modelscope"
+provider_display_name: "ModelScope"
+summary: "Browse stable public ModelScope metadata and account profile details."
+description: "ModelScope skills expose normalized read-only capability contracts for model discovery, overview inspection, file listing, quickstart extraction, and authenticated profile lookup."
+base_url: "https://www.modelscope.cn"
+auth:
+  mode: "session"
+  login_required: true
+  session_provider: "modelscope"
+  notes:
+    - "Use Playwright storage state reuse after an interactive login bootstrap."
+    - "Keep authenticated session handling outside the packaged skill metadata."
+prerequisites:
+  - "Install Chromium with `uv run playwright install chromium` before interactive login flows."
+  - "Persist browser storage state after login so agents can reuse the same session."
+workflows:
+  - "Prefer network responses for search and metadata endpoints."
+  - "Fall back to DOM parsing when no stable JSON contract is available."
+  - "Escalate to guided UI only for login or strongly interactive flows."
+recovery:
+  - "If search responses drift, inspect captured network payloads before adding new selectors."
+  - "If the session expires, run `web2skill sessions login modelscope` again."
+human_handoff:
+  - "Ask a human to complete interactive login or MFA challenges."
+capabilities:
+  - name: "modelscope.search_models"
+    summary: "Search public models by query, task, ranking, and page."
+    description: "Returns normalized model search results without mutating remote state."
+    risk: "low"
+    strategies: ["network", "dom"]
+    requires_confirmation: false
+    input_schema:
+      type: "object"
+      properties:
+        query:
+          type: "string"
+        task:
+          type: ["string", "null"]
+        sort:
+          type: "string"
+          default: "relevance"
+        page:
+          type: "integer"
+          default: 1
+          minimum: 1
+      required: ["query"]
+      additionalProperties: false
+    output_schema:
+      type: "object"
+      properties:
+        items:
+          type: "array"
+        total:
+          type: "integer"
+    prerequisites:
+      - "No authenticated session required for public search."
+    workflows:
+      - "Send the query through the primary search endpoint."
+      - "Normalize model slugs, owners, tags, and ranking metadata."
+    recovery:
+      - "Retry with DOM extraction if the search API shape changes."
+    examples:
+      - name: "Search Qwen models"
+        description: "Look up Qwen models on the first page."
+        input:
+          query: "qwen"
+          page: 1
+        output:
+          items:
+            - model_slug: "Qwen/Qwen2.5-7B-Instruct"
+          total: 1
+  - name: "modelscope.get_model_overview"
+    summary: "Fetch the normalized overview for a specific model slug."
+    description: "Returns owner, summary, tags, stats, and metadata for a known model."
+    risk: "low"
+    strategies: ["network", "dom"]
+    requires_confirmation: false
+    input_schema:
+      type: "object"
+      properties:
+        model_slug:
+          type: "string"
+      required: ["model_slug"]
+      additionalProperties: false
+    output_schema:
+      type: "object"
+      properties:
+        model_slug:
+          type: "string"
+        overview:
+          type: "object"
+    workflows:
+      - "Load the model detail resource using the slug."
+      - "Normalize cards, metadata, and usage signals."
+    recovery:
+      - "Fallback to stable DOM anchors on the model overview page."
+  - name: "modelscope.list_model_files"
+    summary: "List repository files for a given model."
+    description: "Returns normalized file entries, sizes, and paths exposed by ModelScope."
+    risk: "low"
+    strategies: ["network", "dom"]
+    requires_confirmation: false
+    input_schema:
+      type: "object"
+      properties:
+        model_slug:
+          type: "string"
+      required: ["model_slug"]
+      additionalProperties: false
+    output_schema:
+      type: "object"
+      properties:
+        model_slug:
+          type: "string"
+        files:
+          type: "array"
+    workflows:
+      - "Query the files endpoint for the repository tree."
+      - "Normalize file names, paths, sizes, and directory markers."
+  - name: "modelscope.get_quickstart"
+    summary: "Extract the quickstart or usage section for a model."
+    description: "Returns stable quickstart guidance to help an agent explain how to use the model."
+    risk: "low"
+    strategies: ["network", "dom"]
+    requires_confirmation: false
+    input_schema:
+      type: "object"
+      properties:
+        model_slug:
+          type: "string"
+      required: ["model_slug"]
+      additionalProperties: false
+    output_schema:
+      type: "object"
+      properties:
+        model_slug:
+          type: "string"
+        quickstart:
+          type: "string"
+    workflows:
+      - "Prefer structured model card content when available."
+      - "Fallback to DOM extraction for the usage block."
+    recovery:
+      - "If no quickstart exists, return an empty normalized section with source metadata."
+  - name: "modelscope.get_account_profile"
+    summary: "Fetch the authenticated account profile for the current user."
+    description: "Returns normalized profile details from an already-authenticated ModelScope session."
+    risk: "medium"
+    strategies: ["network", "dom", "ui"]
+    requires_confirmation: false
+    input_schema:
+      type: "object"
+      properties: {}
+      additionalProperties: false
+    output_schema:
+      type: "object"
+      properties:
+        username:
+          type: "string"
+        display_name:
+          type: "string"
+        organizations:
+          type: "array"
+    prerequisites:
+      - "An existing authenticated browser session is required."
+    workflows:
+      - "Reuse stored Playwright session state."
+      - "Read account information from authenticated APIs before DOM fallbacks."
+    recovery:
+      - "If session reuse fails, trigger the login bootstrap flow."
+    human_handoff:
+      - "Escalate if the account requires CAPTCHA, MFA, or other interactive approval."
